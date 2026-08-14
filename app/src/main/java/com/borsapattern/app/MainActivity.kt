@@ -1719,7 +1719,17 @@ class MainActivity:ComponentActivity(){
 
             item{
                 PolishedCard{
-                    Text("وضعیت تحلیل یکپارچه",fontSize=15.sp,fontWeight=FontWeight.Black)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.SpaceBetween,
+                        verticalAlignment=Alignment.CenterVertically
+                    ){
+                        Text("وضعیت تحلیل یکپارچه",fontSize=15.sp,fontWeight=FontWeight.Black)
+                        Surface(color=Color(0xFFE9FFF7),shape=RoundedCornerShape(50)){
+                            Text("۳ موتور موازی",Modifier.padding(horizontal=10.dp,vertical=5.dp),fontSize=9.sp,fontWeight=FontWeight.Bold,color=Color(0xFF087A57))
+                        }
+                    }
+                    Text("هر مرحله به محض آماده شدن داده‌های خودش شروع می‌شود؛ لازم نیست کل مرحله قبلی تمام شود.",fontSize=10.sp,color=Color(0xFF747785))
                     ProcessCardInline(
                         title="۱. بررسی کاندیدها و صف واقعی بعد از ۹",
                         status=analysisStatus,

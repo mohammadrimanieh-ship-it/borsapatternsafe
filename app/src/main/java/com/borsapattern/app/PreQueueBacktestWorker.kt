@@ -2,7 +2,7 @@ package com.borsapattern.app
 
 import android.content.Context
 import androidx.work.*
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
@@ -101,12 +101,22 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             )
             .apply()
 
-        for((index,item) in items.withIndex()){
-            try{
-                analyzeDay(item.insCode,item.date,item.eventTime,item.status)
-            }catch(_:Exception){
-                markUnavailable(item.insCode,item.date)
+        // v3: three event analyses run concurrently. This is deliberately capped at 3
+        // so historical validation cannot starve the live scanner/network pool.
+        var processedInRun=0
+        for(chunk in items.chunked(3)){
+            coroutineScope {
+                chunk.map{item->
+                    async(Dispatchers.IO){
+                        try{
+                            analyzeDay(item.insCode,item.date,item.eventTime,item.status)
+                        }catch(_:Exception){
+                            markUnavailable(item.insCode,item.date)
+                        }
+                    }
+                }.awaitAll()
             }
+            processedInRun += chunk.size
             val done=dao.walkForwardProcessedCount()
             prefs.edit()
                 .putBoolean("metrics_partial",true)
@@ -114,11 +124,12 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 .putInt("events_total",total)
                 .putString(
                     "status",
-                    "Walk-Forward قیفی: $done از $total • آمار پایین موقت و زنده است"
+                    "Walk-Forward قیفی: $done از $total • پردازش ۳تایی موازی • آمار موقت و زنده"
                 )
                 .apply()
-            if((index+1)%6==0) rebuildMetrics()
+            if(processedInRun%6==0) rebuildMetrics()
             setProgress(workDataOf("done" to done,"total" to total))
+            yield()
         }
         rebuildMetrics()
 

@@ -23,39 +23,26 @@ class PipelineCoordinatorWorker(
 
         val segments=MarketPrefs.selectedSegments(applicationContext).toList()
         val types=MarketPrefs.selectedTypes(applicationContext).toList()
-        val pendingCandidates=
-            dao.candidateCountFor(segments,types)+dao.errorCountFor(segments,types)
+        // v3 parallel pipeline: start every stage that already has eligible work.
+        // The stages still respect data dependencies at row level, but no longer wait
+        // for the whole previous stage to finish before useful work can begin.
+        val pendingCandidates=dao.candidateCountFor(segments,types)+dao.errorCountFor(segments,types)
+        var launched=false
         if(pendingCandidates>0){
             val req=OneTimeWorkRequestBuilder<QueueAnalysisWorker>()
                 .setConstraints(HistoricalWorker.networkConstraint())
-                .setInputData(
-                    workDataOf(
-                        "batchSize" to 120,
-                        "parallelism" to 4,
-                        "resetErrors" to true
-                    )
-                )
+                .setInputData(workDataOf("batchSize" to 120,"parallelism" to 4,"resetErrors" to true))
                 .build()
-            wm.enqueueUniqueWork(
-                QueueAnalysisWorker.ANALYSIS_CHAIN,
-                ExistingWorkPolicy.KEEP,
-                req
-            )
-            state.edit().putString("stage","DAY1").apply()
-            return Result.success()
+            wm.enqueueUniqueWork(QueueAnalysisWorker.ANALYSIS_CHAIN,ExistingWorkPolicy.KEEP,req)
+            launched=true
         }
 
         if(dao.nextDayPendingCount()>0){
             val req=OneTimeWorkRequestBuilder<NextDayQueueWorker>()
                 .setConstraints(HistoricalWorker.networkConstraint())
                 .build()
-            wm.enqueueUniqueWork(
-                NextDayQueueWorker.CHAIN,
-                ExistingWorkPolicy.KEEP,
-                req
-            )
-            state.edit().putString("stage","NEXT_DAY").apply()
-            return Result.success()
+            wm.enqueueUniqueWork(NextDayQueueWorker.CHAIN,ExistingWorkPolicy.KEEP,req)
+            launched=true
         }
 
         val walkTotal=dao.walkForwardEligibleCount()
@@ -65,12 +52,12 @@ class PipelineCoordinatorWorker(
                 .setConstraints(HistoricalWorker.networkConstraint())
                 .setInputData(workDataOf("batch" to 24))
                 .build()
-            wm.enqueueUniqueWork(
-                PreQueueBacktestWorker.CHAIN,
-                ExistingWorkPolicy.KEEP,
-                req
-            )
-            state.edit().putString("stage","WALK_FORWARD").apply()
+            wm.enqueueUniqueWork(PreQueueBacktestWorker.CHAIN,ExistingWorkPolicy.KEEP,req)
+            launched=true
+        }
+
+        if(launched){
+            state.edit().putString("stage","PARALLEL_3").apply()
             return Result.success()
         }
 

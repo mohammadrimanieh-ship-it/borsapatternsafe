@@ -349,7 +349,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v${BuildConfig.VERSION_NAME}",
+                                    "Signal • v3.1.0.2-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -595,7 +595,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v${BuildConfig.VERSION_NAME}",
+                        "v3.1.0.2-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp

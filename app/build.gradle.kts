@@ -17,8 +17,8 @@ android {
         applicationId = "com.borsapattern.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 50
-        versionName = "3.1.0-safe"
+        versionCode = 52
+        versionName = "3.1.0.2-safe"
     }
 
     signingConfigs {
@@ -48,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

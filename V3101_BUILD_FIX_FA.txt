@@ -1,0 +1,9 @@
+Signal v3.1.0.1-safe
+
+Build-fix برای v3.1.0-safe:
+- فعال‌سازی صریح buildConfig=true برای BuildConfig.VERSION_NAME
+- import صریح BuildConfig در MainActivity
+- منطق Universe، Watch→Confirm→Signal، Lead Time و موتورهای موازی بدون تغییر
+
+versionCode=51
+versionName=3.1.0.1-safe

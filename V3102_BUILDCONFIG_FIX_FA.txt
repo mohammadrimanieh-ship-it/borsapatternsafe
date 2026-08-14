@@ -1,0 +1,18 @@
+Signal v3.1.0.2-safe
+
+رفع قطعی خطای compileDebugKotlin:
+Unresolved reference 'BuildConfig' در MainActivity.kt خطوط 352 و 598.
+
+در این نسخه برای جلوگیری از وابستگی به تولید BuildConfig در GitHub Actions،
+نمایش نسخه UI مستقیماً به v3.1.0.2-safe تغییر داده شد و تمام ارجاعات BuildConfig حذف شدند.
+
+هیچ تغییری در منطق:
+- Universe
+- Watch -> Confirm -> Signal
+- Lead Time
+- Walk-Forward
+- سه موتور موازی
+انجام نشده است.
+
+versionCode=52
+versionName=3.1.0.2-safe

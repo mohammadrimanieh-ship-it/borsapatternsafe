@@ -293,7 +293,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.8.4-safe",
+                                    "Signal • v2.8.5-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -531,7 +531,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.8.4-safe",
+                        "v2.8.5-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -941,9 +941,14 @@ class MainActivity:ComponentActivity(){
                         color=Color(0xFF777A86)
                     )
                     Text(
-                        "این درصدها فقط صف‌های معتبر بعد از ۰۹:۰۰ را می‌سنجند. صفی که از پیش‌گشایش وجود داشته، جدا ثبت می‌شود و موفقیت پیش‌بینی محسوب نمی‌شود.",
+                        "Walk-Forward واقعی: شبیه‌سازی از ۰۹:۰۰ رو‌به‌جلو حرکت می‌کند. در هر لحظه فقط داده همان لحظه و قبل از آن قابل مشاهده است؛ زمان صف، سقف نهایی روز و نتیجه روز بعد هیچ‌کدام وارد امتیاز همان لحظه نمی‌شوند.",
                         fontSize=10.sp,
                         color=Color(0xFF777A86)
+                    )
+                    Text(
+                        "صف‌های قبل از ۰۹:۰۰ جدا هستند و موفقیت پیش‌بینی محسوب نمی‌شوند. نتیجه روز بعد فقط بعداً برای ارزیابی کیفیت سیگنال استفاده می‌شود.",
+                        fontSize=9.sp,
+                        color=Color(0xFF118658)
                     )
                     Spacer(Modifier.height(6.dp))
                     Row(
@@ -1326,6 +1331,10 @@ class MainActivity:ComponentActivity(){
                     Text(
                         "اختیار معامله و ابزارهای درآمد ثابت از همان ورودی حذف می‌شوند و وارد دیتابیس تحلیل/استخراج تاریخی نمی‌شوند.",
                         fontSize=9.sp,color=Color(0xFFB05B5B)
+                    )
+                    Text(
+                        "موارد مبهم در مرحله سبک Metadata نگه داشته می‌شوند تا سهام واقعی اشتباهی حذف نشوند؛ تا زمان تأیید وارد استخراج سنگین نمی‌شوند.",
+                        fontSize=9.sp,color=Color(0xFF777A86)
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(
@@ -1889,17 +1898,21 @@ class MainActivity:ComponentActivity(){
                                 val snapsForDay=preQueue
                                     .filter{it.date==s.date && it.label==1}
                                     .sortedByDescending{it.minutesBefore}
-                                val firstDetectedForDay=snapsForDay
-                                    .filter{it.detected}
-                                    .maxByOrNull{it.minutesBefore}
+                                val firstDetectedForDay=preQueue
+                                    .firstOrNull{
+                                        it.date==s.date &&
+                                        it.label==1 &&
+                                        it.minutesBefore==0 &&
+                                        it.detected
+                                    }
 
                                 Text(
                                     when(s.status){
                                         "QUEUE_CONFIRMED" ->
                                             if(firstDetectedForDay!=null)
-                                                "اولین هشدار ${fmtTime(firstDetectedForDay.snapshotTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${fa(firstDetectedForDay.minutesBefore)} دقیقه"
+                                                "اولین هشدار ${fmtTime(firstDetectedForDay.snapshotTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${leadMinutesText(firstDetectedForDay.snapshotTime,s.eventTime)}"
                                             else
-                                                "صف ${fmtTime(s.eventTime)} • قبل از صف هشدار معتبر ثبت نشد"
+                                                "صف ${fmtTime(s.eventTime)} • در شبیه‌سازی رو‌به‌جلو هشدار قبلی ثبت نشد"
                                         "FRAGILE_QUEUE" ->
                                             "صف شکننده ${fmtTime(s.eventTime)} • از سیگنال مثبت حذف شده"
                                         "PREOPEN_QUEUE" ->

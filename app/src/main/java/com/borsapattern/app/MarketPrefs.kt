@@ -176,18 +176,11 @@ object MarketPrefs {
         flow:Int?,
         board:String?
     ):Boolean{
-        if(isDefinitelyExcluded(symbol,name,flow,board)) return false
-
-        val type=classifyType(symbol,name,flow,board)
-        if(type!=TYPE_STOCK && type!=TYPE_BASE) return false
-
-        val segment=classify(flow,board)
-        // Recognized stock markets are immediately accepted. Unknown stock-like
-        // rows are kept only when they at least carry a usable symbol/name so
-        // MetadataWorker can quarantine/resolve them without importing opaque junk.
-        return segment!=OTHER ||
-            !symbol.isNullOrBlank() ||
-            !name.isNullOrBlank()
+        // Stage-1 must be conservative: only instruments that are DEFINITELY
+        // irrelevant are discarded here. Ambiguous rows are kept only for
+        // lightweight metadata resolution and never enter heavy analysis until
+        // their market/type is confirmed.
+        return !isDefinitelyExcluded(symbol,name,flow,board)
     }
 
     fun isSignalUniverse(

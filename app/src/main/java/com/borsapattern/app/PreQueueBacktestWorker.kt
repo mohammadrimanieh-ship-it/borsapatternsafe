@@ -16,6 +16,20 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
     private val prefs get()=applicationContext.getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
+        // Algorithm v2 removes look-ahead. Old derived snapshots are invalid and
+        // are rebuilt from the already-downloaded historical data.
+        if(prefs.getInt("causal_model_version",0)<2){
+            dao.deleteAllPreQueueSnapshots()
+            prefs.edit()
+                .clear()
+                .putInt("causal_model_version",2)
+                .putString(
+                    "status",
+                    "مدل علّی جدید فعال شد؛ Walk-Forward از داده تاریخی موجود بازسازی می‌شود"
+                )
+                .apply()
+        }
+
         val batch=inputData.getInt("batch",24).coerceIn(8,40)
         val sql=app.db.openHelper.readableDatabase
 
@@ -64,7 +78,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             .putBoolean("running",true)
             .putInt("events_total",total)
             .putInt("events_done",dao.walkForwardProcessedCount())
-            .putString("status","در حال بازسازی هشدارهای قبل از صف")
+            .putString("status","Walk-Forward علّی: هر Snapshot فقط با داده همان لحظه و قبل از آن")
             .apply()
 
         for(item in items){
@@ -77,7 +91,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             prefs.edit()
                 .putInt("events_done",done)
                 .putInt("events_total",total)
-                .putString("status","Walk-Forward: $done از $total رخداد")
+                .putString("status","Walk-Forward بدون Look-Ahead: $done از $total رخداد")
                 .apply()
             setProgress(workDataOf("done" to done,"total" to total))
         }
@@ -99,10 +113,13 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val day=dao.dailyFor(insCode,date) ?: run{
             markUnavailable(insCode,date); return
         }
-        val high=day.high ?: run{
+        // IMPORTANT: yesterday is known before today's session.
+        // day.high is deliberately NOT used because it contains future information
+        // relative to an intraday snapshot and would create look-ahead bias.
+        val yesterday=day.yesterday ?: run{
             markUnavailable(insCode,date); return
         }
-        if(high<=0){
+        if(yesterday<=0){
             markUnavailable(insCode,date); return
         }
 
@@ -137,14 +154,62 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val out=mutableListOf<PreQueueSnapshotEntity>()
 
         if(status=="QUEUE_CONFIRMED" && eventTime!=null){
+            // TRUE FORWARD SIMULATION:
+            // Start at 09:00 and move forward. At each moment the model sees only
+            // BestLimits records up to that moment. eventTime is NOT used to choose
+            // a "good-looking" historical snapshot; it is used only afterwards to
+            // measure how early an already-issued alert was.
+            var firstAlert:Pair<Book,Metrics>?=null
+            var lastEvaluatedTime=0
+
+            for(now in books){
+                if(now.time>=eventTime) break
+                // Roughly one evaluation per minute prevents repeated ticks from
+                // dominating the backtest while preserving chronology.
+                if(lastEvaluatedTime!=0 && secondsBetween(lastEvaluatedTime,now.time)<55) continue
+
+                val base=books.lastOrNull{
+                    it.time<=minusMinutes(now.time,5)
+                } ?: books.first()
+
+                val metrics=scoreSnapshot(now,base,yesterday)
+                lastEvaluatedTime=now.time
+
+                if(firstAlert==null && metrics.score>=70.0){
+                    firstAlert=now to metrics
+                }
+            }
+
+            // key=0 is the exact alert actually emitted by the chronological replay.
+            firstAlert?.let{(alertBook,metrics)->
+                out += PreQueueSnapshotEntity(
+                    insCode=insCode,
+                    date=date,
+                    minutesBefore=0,
+                    snapshotTime=alertBook.time,
+                    score=metrics.score,
+                    bidImbalance=metrics.imbalance,
+                    bidGrowth=metrics.bidGrowth,
+                    askDrop=metrics.askDrop,
+                    pricePressure=metrics.pricePressure,
+                    label=1,
+                    detected=true
+                )
+            }
+
+            // Standard lead-time checkpoints are evaluation-only. "detected" means
+            // the forward replay had ALREADY emitted an alert by that checkpoint.
             val checkpoints=listOf(30,20,15,10,5)
             for(mins in checkpoints){
                 val target=minusMinutes(eventTime,mins)
                 val now=books.lastOrNull{it.time<=target} ?: continue
-                val baselineTarget=minusMinutes(now.time,5)
-                val base=books.lastOrNull{it.time<=baselineTarget} ?: books.first()
+                val base=books.lastOrNull{
+                    it.time<=minusMinutes(now.time,5)
+                } ?: books.first()
+                val metrics=scoreSnapshot(now,base,yesterday)
+                val alertAlreadyIssued=
+                    firstAlert?.first?.time?.let{it<=target} ?: false
 
-                val metrics=scoreSnapshot(now,base,high)
                 out += PreQueueSnapshotEntity(
                     insCode=insCode,
                     date=date,
@@ -156,7 +221,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                     askDrop=metrics.askDrop,
                     pricePressure=metrics.pricePressure,
                     label=1,
-                    detected=metrics.score>=70.0
+                    detected=alertAlreadyIssued
                 )
             }
         }else if(status=="NOT_QUEUE" || status=="FRAGILE_QUEUE"){
@@ -169,7 +234,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             for((key,target) in negatives){
                 val now=books.lastOrNull{it.time<=target} ?: continue
                 val base=books.lastOrNull{it.time<=minusMinutes(now.time,5)} ?: books.first()
-                val metrics=scoreSnapshot(now,base,high)
+                val metrics=scoreSnapshot(now,base,yesterday)
                 out += PreQueueSnapshotEntity(
                     insCode=insCode,
                     date=date,
@@ -214,7 +279,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val pricePressure:Double
     )
 
-    private fun scoreSnapshot(now:Book,base:Book,high:Double):Metrics{
+    private fun scoreSnapshot(now:Book,base:Book,yesterday:Double):Metrics{
         val nowBidPrice=now.bidPrice
         val nowBidVol=now.bidVol
         val nowAskVol=now.askVol
@@ -228,21 +293,34 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val askDrop=
             if(baseAskVol>0) (1.0-nowAskVol/baseAskVol).coerceIn(-2.0,1.0)
             else if(nowAskVol<=0) 1.0 else 0.0
-        val pricePressure=(nowBidPrice/high).coerceIn(0.0,1.05)
-
-        val proximity=((pricePressure-0.94)/0.06).coerceIn(0.0,1.0)
+        // Causal price pressure: only compare the current bid with yesterday's
+        // close, which was already known before the session started.
+        val intradayRise=((nowBidPrice/yesterday)-1.0).coerceIn(-0.20,0.20)
+        val pricePressure=intradayRise
+        val riseScore=((intradayRise-0.005)/0.045).coerceIn(0.0,1.0)
         val imbScore=((imbalance-0.50)/0.50).coerceIn(0.0,1.0)
         val growthScore=(bidGrowth/1.5).coerceIn(0.0,1.0)
         val supplyScore=((askDrop+0.15)/1.15).coerceIn(0.0,1.0)
 
+        // Fixed coefficients: no parameter is learned from the future target day.
         val score=(
-            proximity*32.0 +
-            imbScore*30.0 +
-            growthScore*20.0 +
-            supplyScore*18.0
+            riseScore*30.0 +
+            imbScore*32.0 +
+            growthScore*22.0 +
+            supplyScore*16.0
         ).coerceIn(0.0,100.0)
 
         return Metrics(score,imbalance,bidGrowth,askDrop,pricePressure)
+    }
+
+    private fun secondsBetween(a:Int,b:Int):Int{
+        fun sec(v:Int):Int{
+            val h=v/10000
+            val m=(v/100)%100
+            val s=v%100
+            return h*3600+m*60+s
+        }
+        return (sec(b)-sec(a)).coerceAtLeast(0)
     }
 
     private fun minusMinutes(time:Int,mins:Int):Int{

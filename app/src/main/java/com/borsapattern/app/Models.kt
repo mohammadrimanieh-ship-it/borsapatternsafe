@@ -133,6 +133,9 @@ interface BorsaDao {
     @Query("DELETE FROM prequeue_snapshots WHERE insCode IN (:codes)")
     suspend fun deletePreQueueByCodes(codes:List<String>)
 
+    @Query("DELETE FROM prequeue_snapshots")
+    suspend fun deleteAllPreQueueSnapshots()
+
     @Query("DELETE FROM queue_events WHERE insCode IN (:codes)")
     suspend fun deleteEventsByCodes(codes:List<String>)
 

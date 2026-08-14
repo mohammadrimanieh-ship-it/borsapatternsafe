@@ -1,0 +1,16 @@
+Signal v2.2.1-test - Build Fix
+
+خطای گزارش‌شده:
+settings.gradle.kts به اشتباه با XML شروع می‌شد.
+
+در این بسته:
+- settings.gradle.kts از نو و فقط با Kotlin DSL ساخته شده.
+- فایل network_security_config.xml فقط در مسیر درست:
+  app/src/main/res/xml/network_security_config.xml
+  قرار دارد.
+- یک Workflow مستقل به نام Build Signal Debug APK اضافه شده که قبل از Build
+  بررسی می‌کند settings.gradle.kts شامل XML نباشد.
+- نسخه برنامه به 2.2.1-test / versionCode 28 افزایش یافته است.
+
+اگر در GitHub هنوز Workflow قدیمی «Build debug APK» را اجرا می‌کنید، از Workflow جدید
+«Build Signal Debug APK» استفاده کنید تا مطمئن شوید فایل‌های همین بسته Build می‌شوند.

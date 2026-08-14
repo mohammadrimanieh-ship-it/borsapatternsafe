@@ -1,0 +1,18 @@
+تنظیم آپدیت پایدار Borsa Pattern
+
+هدف: همه نسخه‌های بعدی با یک کلید ثابت امضا شوند تا Android گزینه Update را قبول کند.
+
+این فایل عمداً هیچ رمز یا کلید خصوصی داخل پروژه قرار نمی‌دهد، چون Repository شما ممکن است Public باشد.
+کلید امضا نباید داخل GitHub Repository آپلود شود.
+
+مرحله بعد:
+1) یک keystore ثابت تولید می‌کنیم.
+2) محتوای آن را Base64 می‌کنیم.
+3) چهار مقدار را در GitHub Repository > Settings > Secrets and variables > Actions ثبت می‌کنیم:
+   BORSAPATTERN_KEYSTORE_BASE64
+   BORSAPATTERN_KEYSTORE_PASSWORD
+   BORSAPATTERN_KEY_ALIAS
+   BORSAPATTERN_KEY_PASSWORD
+4) Workflow Release را به این Secrets وصل می‌کنیم.
+
+مهم: APKهای قبلی Debug احتمالاً امضای متفاوت دارند. برای ورود به زنجیره امضای ثابت ممکن است فقط یک بار حذف و نصب لازم باشد؛ از نسخه Release ثابت به بعد Update مستقیم ممکن خواهد بود.

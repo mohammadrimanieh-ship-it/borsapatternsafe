@@ -1,0 +1,16 @@
+Signal v2.6-test
+
+تغییرات کلیدی:
+- فقط صف پایدار روز اول نمونه مثبت است؛ صف شکننده FRAGILE_QUEUE می‌شود.
+- دوام، نسبت پایداری، تعداد شکست، حفظ صف انتهای بازار و retention ارزش صف ذخیره می‌شود.
+- مثبت/منفی روز کاری بعد در همان تحلیل اصلی ذخیره می‌شود و گزینه جدا حذف شده است.
+- Precision و False Positive در Walk-Forward نمایش داده می‌شوند.
+- صف شکننده نمونه منفی Walk-Forward است.
+- استخراج QUICK تا 6 نماد و DEEP تا 3 نماد به صورت موازی و checkpoint-based انجام می‌شود.
+- تشخیص صندوق اهرمی با fallback قوی‌تر شده است.
+- Room DB version 8 + Migration 7->8.
+- Queue analysis model version 5؛ snapshotهای مدل قبلی برای بازسازی صحیح پاک می‌شوند.
+
+توجه: محیط ساخت این جلسه Gradle محلی نداشت؛ پروژه با بررسی ساختاری، توازن Kotlin blocks،
+اعتبارسنجی XML و کنترل migration/workflow بسته‌بندی شده است. Build نهایی را با GitHub Actions
+همان پروژه اجرا کنید.

@@ -1,0 +1,13 @@
+ساخت APK بدون نصب Android SDK روی ویندوز
+
+1) یک حساب GitHub لازم است.
+2) یک Repository جدید بسازید.
+3) تمام محتویات همین پوشه را در ریشه Repository آپلود کنید.
+4) وارد تب Actions شوید.
+5) Workflow با نام Build Android APK را باز کنید.
+6) Run workflow را بزنید.
+7) پس از پایان Build، پایین صفحه بخش Artifacts ظاهر می‌شود.
+8) BorsaPattern-debug-apk را دانلود کنید.
+9) فایل ZIP دانلودشده را باز کنید؛ app-debug.apk داخل آن است.
+
+نیازی به Android Studio یا Android SDK روی کامپیوتر شما نیست.

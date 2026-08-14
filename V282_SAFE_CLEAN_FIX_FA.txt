@@ -1,0 +1,14 @@
+Signal v2.8.2-safe
+
+رفع خطای Build نسخه Safe:
+- MarketMonitorService.kt کاملاً حذف شد.
+- BootReceiver.kt و MarketClock.kt حذف شدند.
+- Permissionهای Foreground Service و Boot Receiver از Manifest حذف شدند.
+- هر ارجاع به recommendedDelayMillis حذف شد.
+- LiveWorker به رفتار ساده سازگار با v2.8 برگشت.
+- دیتابیس امن borsa_safe_v281.db همچنان حفظ شده است.
+- امکانات امن UI نسخه قبل باقی مانده:
+  ساعت/تاریخ، جستجوی مجدد، توضیح Lead Time.
+
+versionCode=41
+versionName=2.8.2-safe

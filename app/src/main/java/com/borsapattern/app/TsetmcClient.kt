@@ -27,6 +27,18 @@ class TsetmcClient {
         }
     }
 
+    fun healthCheck(): Boolean {
+        return try{
+            val raw=get(
+                "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0" +
+                    "&paperTypes[0]=1&withBestLimits=false&hEven=0&RefID=0"
+            )
+            raw.isNotBlank() && (raw.trim().startsWith("{") || raw.trim().startsWith("["))
+        }catch(_:Exception){
+            false
+        }
+    }
+
     fun marketWatchRaw(): String {
         val u = "https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0" +
             "&paperTypes[0]=1&paperTypes[1]=2&paperTypes[2]=3&paperTypes[3]=4" +

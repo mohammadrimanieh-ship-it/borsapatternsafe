@@ -35,6 +35,11 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             var rawExcludedThisRefresh=0
+            val exclusionAudit=linkedMapOf(
+                "OPTION" to 0,"FIXED_INCOME" to 0,"HOUSING" to 0,"RIGHT" to 0,
+                "BOND" to 0,"FUTURE" to 0,"COMMODITY" to 0,"TAL" to 0,
+                "ENERGY" to 0,"OTHER_FUND" to 0
+            )
             if(!finalizeOnly){
             val existing=dao.allSymbols().associateBy{it.insCode}
             val fresh=ArrayList<SymbolEntity>(arr.length())
@@ -68,9 +73,10 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
                 val type=MarketPrefs.classifyType(symbol,name,flow,board)
 
-                // v2.8.3: definite non-target instruments never enter the analysis DB.
-                if(!MarketPrefs.isRawTargetCandidate(symbol,name,flow,board)){
+                val exclusionReason=MarketPrefs.exclusionReason(symbol,name,flow,board)
+                if(exclusionReason!=null){
                     rawExcludedThisRefresh++
+                    exclusionAudit[exclusionReason]=(exclusionAudit[exclusionReason] ?: 0)+1
                     continue
                 }
 
@@ -167,6 +173,14 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                     if(finalizeOnly) prefs.getInt("excluded_count",excluded)
                     else rawExcludedThisRefresh+excluded
                 )
+                .putInt("excluded_option",if(finalizeOnly) prefs.getInt("excluded_option",0) else exclusionAudit["OPTION"] ?: 0)
+                .putInt("excluded_fixed_income",if(finalizeOnly) prefs.getInt("excluded_fixed_income",0) else exclusionAudit["FIXED_INCOME"] ?: 0)
+                .putInt("excluded_housing",if(finalizeOnly) prefs.getInt("excluded_housing",0) else exclusionAudit["HOUSING"] ?: 0)
+                .putInt("excluded_right",if(finalizeOnly) prefs.getInt("excluded_right",0) else exclusionAudit["RIGHT"] ?: 0)
+                .putInt("excluded_bond",if(finalizeOnly) prefs.getInt("excluded_bond",0) else exclusionAudit["BOND"] ?: 0)
+                .putInt("excluded_future",if(finalizeOnly) prefs.getInt("excluded_future",0) else exclusionAudit["FUTURE"] ?: 0)
+                .putInt("excluded_commodity",if(finalizeOnly) prefs.getInt("excluded_commodity",0) else exclusionAudit["COMMODITY"] ?: 0)
+                .putInt("excluded_other_fund",if(finalizeOnly) prefs.getInt("excluded_other_fund",0) else exclusionAudit["OTHER_FUND"] ?: 0)
                 .putString(
                     "status",
                     if(finalizeOnly && unknownStockLike>0)

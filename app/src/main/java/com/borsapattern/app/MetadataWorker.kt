@@ -13,7 +13,13 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val catalogPrefs get()=applicationContext.getSharedPreferences("catalog",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val batch=inputData.getInt("batch",60).coerceIn(20,100)
+        if(prefs.getInt("resolver_version",0)<3){
+            prefs.edit()
+                .remove("quarantine_codes")
+                .putInt("resolver_version",3)
+                .apply()
+        }
+        val batch=inputData.getInt("batch",80).coerceIn(20,120)
         val round=inputData.getInt("round",0)
         val quarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
         val symbols=dao.symbolsNeedingMetadata(batch*4)
@@ -93,14 +99,14 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
         dao.repairLiveScoreNames()
 
-        if(unresolved.isNotEmpty()){
-            val merged=(quarantine + unresolved).take(1500).toSet()
+        if(unresolved.isNotEmpty() && round>=2){
+            val merged=(quarantine + unresolved).take(2500).toSet()
             prefs.edit().putStringSet("quarantine_codes",merged).apply()
         }
         val updatedQuarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
         val remaining=dao.symbolsNeedingMetadata(batch*4)
             .any{!updatedQuarantine.contains(it.insCode)}
-        if(!remaining || round>=20){
+        if(!remaining || round>=45){
             dao.repairLiveScoreNames()
             prefs.edit()
                 .putString(

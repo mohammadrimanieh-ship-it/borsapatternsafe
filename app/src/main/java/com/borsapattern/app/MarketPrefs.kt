@@ -149,25 +149,40 @@ object MarketPrefs {
             knownAliases.contains(s)
     }
 
+    fun exclusionReason(
+        symbol:String?,
+        name:String?,
+        flow:Int?,
+        board:String?
+    ):String?{
+        if(isOptionInstrument(symbol,name,board)) return "OPTION"
+        if(isFixedIncomeInstrument(symbol,name,board)) return "FIXED_INCOME"
+
+        val type=classifyType(symbol,name,flow,board)
+        val leveraged=type==TYPE_FUND && isLeveragedFund(symbol,name)
+        if(leveraged) return null
+
+        return when(type){
+            TYPE_HOUSING -> "HOUSING"
+            TYPE_RIGHT -> "RIGHT"
+            TYPE_BOND -> "BOND"
+            TYPE_OPTION -> "OPTION"
+            TYPE_FUTURE -> "FUTURE"
+            TYPE_COMMODITY -> "COMMODITY"
+            TYPE_TAL -> "TAL"
+            TYPE_ENERGY -> "ENERGY"
+            TYPE_FUND -> "OTHER_FUND"
+            else -> null
+        }
+    }
+
     fun isDefinitelyExcluded(
         symbol:String?,
         name:String?,
         flow:Int?,
         board:String?
     ):Boolean{
-        // Options and fixed-income instruments are hard-excluded at source.
-        if(isOptionInstrument(symbol,name,board)) return true
-        if(isFixedIncomeInstrument(symbol,name,board)) return true
-
-        val type=classifyType(symbol,name,flow,board)
-        val leveraged=type==TYPE_FUND && isLeveragedFund(symbol,name)
-
-        if(leveraged) return false
-
-        return type in setOf(
-            TYPE_HOUSING,TYPE_RIGHT,TYPE_BOND,TYPE_OPTION,TYPE_FUTURE,
-            TYPE_COMMODITY,TYPE_TAL,TYPE_ENERGY,TYPE_FUND
-        )
+        return exclusionReason(symbol,name,flow,board)!=null
     }
 
     fun isRawTargetCandidate(

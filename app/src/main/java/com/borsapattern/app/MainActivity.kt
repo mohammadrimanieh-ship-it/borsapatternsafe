@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.work.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -111,6 +113,22 @@ class MainActivity:ComponentActivity(){
         var catalogLeveraged by remember{mutableStateOf(0)}
         var catalogUnknown by remember{mutableStateOf(0)}
         var catalogExcluded by remember{mutableStateOf(0)}
+        var excludedOption by remember{mutableStateOf(0)}
+        var excludedFixedIncome by remember{mutableStateOf(0)}
+        var excludedHousing by remember{mutableStateOf(0)}
+        var excludedRight by remember{mutableStateOf(0)}
+        var excludedBond by remember{mutableStateOf(0)}
+        var excludedFuture by remember{mutableStateOf(0)}
+        var excludedCommodity by remember{mutableStateOf(0)}
+        var excludedOtherFund by remember{mutableStateOf(0)}
+        var total30 by remember{mutableStateOf(0)}
+        var total20 by remember{mutableStateOf(0)}
+        var total15 by remember{mutableStateOf(0)}
+        var total10 by remember{mutableStateOf(0)}
+        var total5 by remember{mutableStateOf(0)}
+        var negativeTotal by remember{mutableStateOf(0)}
+        var truePositive by remember{mutableStateOf(0)}
+        var falsePositiveCount by remember{mutableStateOf(0)}
 
         var specialReopenCount by remember{mutableStateOf(0)}
         var preopenDay1Excluded by remember{mutableStateOf(0)}
@@ -197,6 +215,14 @@ class MainActivity:ComponentActivity(){
                 falsePositiveRate=preQueuePrefs.getFloat("false_positive_rate",0f)
                 precisionRate=preQueuePrefs.getFloat("precision",0f)
                 preQueueSnapshots=preQueuePrefs.getInt("snapshot_count",0)
+                total30=preQueuePrefs.getInt("total_30",0)
+                total20=preQueuePrefs.getInt("total_20",0)
+                total15=preQueuePrefs.getInt("total_15",0)
+                total10=preQueuePrefs.getInt("total_10",0)
+                total5=preQueuePrefs.getInt("total_5",0)
+                negativeTotal=preQueuePrefs.getInt("negative_total",0)
+                truePositive=preQueuePrefs.getInt("true_positive",0)
+                falsePositiveCount=preQueuePrefs.getInt("false_positive",0)
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
@@ -218,6 +244,14 @@ class MainActivity:ComponentActivity(){
                 catalogLeveraged=catalogPrefs.getInt("leveraged_count",0)
                 catalogUnknown=catalogPrefs.getInt("unknown_count",0)
                 catalogExcluded=catalogPrefs.getInt("excluded_count",0)
+                excludedOption=catalogPrefs.getInt("excluded_option",0)
+                excludedFixedIncome=catalogPrefs.getInt("excluded_fixed_income",0)
+                excludedHousing=catalogPrefs.getInt("excluded_housing",0)
+                excludedRight=catalogPrefs.getInt("excluded_right",0)
+                excludedBond=catalogPrefs.getInt("excluded_bond",0)
+                excludedFuture=catalogPrefs.getInt("excluded_future",0)
+                excludedCommodity=catalogPrefs.getInt("excluded_commodity",0)
+                excludedOtherFund=catalogPrefs.getInt("excluded_other_fund",0)
                 delay(1200)
             }
         }
@@ -293,7 +327,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.8.5-safe",
+                                    "Signal • v2.8.6-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -391,7 +425,9 @@ class MainActivity:ComponentActivity(){
                             detect5=detect5,
                             falsePositiveRate=falsePositiveRate,
                             precisionRate=precisionRate,
-                            preQueueSnapshots=preQueueSnapshots
+                            preQueueSnapshots=preQueueSnapshots,
+                            total30=total30,total20=total20,total15=total15,total10=total10,total5=total5,
+                            negativeTotal=negativeTotal,truePositive=truePositive,falsePositiveCount=falsePositiveCount
                         )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
@@ -414,6 +450,8 @@ class MainActivity:ComponentActivity(){
                             preQueueStatus,walkDone,walkTotal,
                             candidates,confirmed,preopenDay1Excluded,
                             fragileQueueCount,rejected,specialReopenCount,errors,
+                            excludedOption,excludedFixedIncome,excludedHousing,excludedRight,
+                            excludedBond,excludedFuture,excludedCommodity,excludedOtherFund,
                             onMarkets={showMarkets=true},
                             onSymbolsUpdate={refreshSymbolCatalog()},
                             onStart={mode->
@@ -531,7 +569,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.8.5-safe",
+                        "v2.8.6-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -605,10 +643,21 @@ class MainActivity:ComponentActivity(){
     ){
         var filter by remember{mutableIntStateOf(0)}
         var nowTick by remember{mutableLongStateOf(System.currentTimeMillis())}
+        var tsetmcConnected by remember{mutableStateOf<Boolean?>(null)}
+        var tsetmcLastSuccess by remember{mutableStateOf<Long?>(null)}
+        val healthClient=remember{TsetmcClient()}
         LaunchedEffect(Unit){
             while(true){
                 nowTick=System.currentTimeMillis()
                 delay(1000)
+            }
+        }
+        LaunchedEffect(Unit){
+            while(true){
+                val ok=withContext(Dispatchers.IO){healthClient.healthCheck()}
+                tsetmcConnected=ok
+                if(ok) tsetmcLastSuccess=System.currentTimeMillis()
+                delay(30000)
             }
         }
         val currentGregorian=remember(nowTick){todayGregorianInt(nowTick)}
@@ -648,12 +697,42 @@ class MainActivity:ComponentActivity(){
                                 color=Color(0xFF777A86)
                             )
                         }
-                        Text(
-                            currentClock,
-                            fontSize=23.sp,
-                            fontWeight=FontWeight.Black,
-                            color=MaterialTheme.colorScheme.primary
-                        )
+                        Column(horizontalAlignment=Alignment.End){
+                            Text(
+                                currentClock,
+                                fontSize=23.sp,
+                                fontWeight=FontWeight.Black,
+                                color=MaterialTheme.colorScheme.primary
+                            )
+                            Row(verticalAlignment=Alignment.CenterVertically){
+                                Text(
+                                    "●",
+                                    color=when(tsetmcConnected){
+                                        true -> Color(0xFF16A36A)
+                                        false -> Color(0xFFD94A4A)
+                                        null -> Color(0xFFD39A20)
+                                    },
+                                    fontSize=13.sp
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    when(tsetmcConnected){
+                                        true -> "TSETMC متصل"
+                                        false -> "TSETMC قطع"
+                                        null -> "TSETMC در حال بررسی"
+                                    },
+                                    fontSize=9.sp,
+                                    fontWeight=FontWeight.Bold
+                                )
+                            }
+                            if(tsetmcLastSuccess!=null){
+                                Text(
+                                    "آخرین دریافت موفق: ${clock(tsetmcLastSuccess!!)}",
+                                    fontSize=8.sp,
+                                    color=Color(0xFF777A86)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -908,7 +987,9 @@ class MainActivity:ComponentActivity(){
         detect30:Float,detect20:Float,detect15:Float,detect10:Float,detect5:Float,
         falsePositiveRate:Float,
         precisionRate:Float,
-        preQueueSnapshots:Int
+        preQueueSnapshots:Int,
+        total30:Int,total20:Int,total15:Int,total10:Int,total5:Int,
+        negativeTotal:Int,truePositive:Int,falsePositiveCount:Int
     ){
         var onlyContinuation by remember{mutableStateOf(true)}
         val continuation=history.filter{
@@ -955,11 +1036,11 @@ class MainActivity:ComponentActivity(){
                         Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(5.dp)
                     ){
-                        MetricPill("هشدار ۳۰دقیقه قبل","${fa((detect30*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("۲۰دقیقه قبل","${fa((detect20*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("۱۵دقیقه قبل","${fa((detect15*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("۱۰دقیقه قبل","${fa((detect10*100).toInt())}٪",Modifier.weight(1f))
-                        MetricPill("۵دقیقه قبل","${fa((detect5*100).toInt())}٪",Modifier.weight(1f))
+                        MetricPill("۳۰دقیقه قبل","${fa((detect30*100).toInt())}٪ • ${fa(total30)} نمونه",Modifier.weight(1f))
+                        MetricPill("۲۰دقیقه قبل","${fa((detect20*100).toInt())}٪ • ${fa(total20)} نمونه",Modifier.weight(1f))
+                        MetricPill("۱۵دقیقه قبل","${fa((detect15*100).toInt())}٪ • ${fa(total15)} نمونه",Modifier.weight(1f))
+                        MetricPill("۱۰دقیقه قبل","${fa((detect10*100).toInt())}٪ • ${fa(total10)} نمونه",Modifier.weight(1f))
+                        MetricPill("۵دقیقه قبل","${fa((detect5*100).toInt())}٪ • ${fa(total5)} نمونه",Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(6.dp))
                     Row(
@@ -973,12 +1054,12 @@ class MainActivity:ComponentActivity(){
                         )
                         MetricPill(
                             "Precision",
-                            "${fa((precisionRate*100).toInt())}٪",
+                            "${fa((precisionRate*100).toInt())}٪ • TP ${fa(truePositive)} / FP ${fa(falsePositiveCount)}",
                             Modifier.weight(1f)
                         )
                         MetricPill(
                             "False Positive",
-                            "${fa((falsePositiveRate*100).toInt())}٪",
+                            "${fa((falsePositiveRate*100).toInt())}٪ • ${fa(negativeTotal)} نمونه منفی",
                             Modifier.weight(1f)
                         )
                     }
@@ -1286,6 +1367,8 @@ class MainActivity:ComponentActivity(){
         walkStatus:String,walkDone:Int,walkTotal:Int,
         candidatePending:Int,confirmedAfter9:Int,preopenExcluded:Int,
         fragileCount:Int,notQueueCount:Int,specialCount:Int,errorCount:Int,
+        excludedOption:Int,excludedFixedIncome:Int,excludedHousing:Int,excludedRight:Int,
+        excludedBond:Int,excludedFuture:Int,excludedCommodity:Int,excludedOtherFund:Int,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
         onStart:(String)->Unit,onAnalyze:()->Unit
     ){
@@ -1359,6 +1442,31 @@ class MainActivity:ComponentActivity(){
                                 color=Color(0xFF7B6517)
                             )
                         }
+                    }
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("Audit ساخت Universe",fontSize=17.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        "هر حذف باید دلیل قطعی داشته باشد؛ موارد مبهم حذف نمی‌شوند و فقط تا تکمیل Metadata از تحلیل سنگین کنار می‌مانند.",
+                        fontSize=10.sp,color=Color(0xFF747785)
+                    )
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
+                        MetricPill("اختیار",fa(excludedOption),Modifier.weight(1f))
+                        MetricPill("درآمد ثابت",fa(excludedFixedIncome),Modifier.weight(1f))
+                        MetricPill("تسه",fa(excludedHousing),Modifier.weight(1f))
+                    }
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
+                        MetricPill("حق‌تقدم",fa(excludedRight),Modifier.weight(1f))
+                        MetricPill("اوراق",fa(excludedBond),Modifier.weight(1f))
+                        MetricPill("آتی",fa(excludedFuture),Modifier.weight(1f))
+                    }
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
+                        MetricPill("کالا",fa(excludedCommodity),Modifier.weight(1f))
+                        MetricPill("صندوق غیر اهرمی",fa(excludedOtherFund),Modifier.weight(1f))
+                        MetricPill("در انتظار Metadata",fa(unknownCount),Modifier.weight(1f))
                     }
                 }
             }

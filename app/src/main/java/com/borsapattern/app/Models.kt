@@ -477,14 +477,15 @@ interface BorsaDao {
 
     @Query("""
       SELECT * FROM prequeue_snapshots
-      WHERE insCode=:insCode AND label=1
-        AND minutesBefore IN (30,20,15,10,5)
-      ORDER BY date DESC, minutesBefore DESC
+      WHERE insCode=:insCode
+        AND minutesBefore IN (0,30,20,15,10,5,-100,-200,-300)
+      ORDER BY date DESC,
+               CASE WHEN minutesBefore=0 THEN -1 ELSE minutesBefore END DESC
       LIMIT :limit
     """)
     suspend fun preQueueTimelineForSymbol(
         insCode:String,
-        limit:Int=500
+        limit:Int=700
     ):List<PreQueueSnapshotRow>
 
     @Query("SELECT COUNT(*) FROM prequeue_snapshots")

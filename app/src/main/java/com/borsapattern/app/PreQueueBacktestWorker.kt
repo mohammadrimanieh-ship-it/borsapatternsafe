@@ -16,16 +16,17 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
     private val prefs get()=applicationContext.getSharedPreferences("prequeue_backtest",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        // Algorithm v2 removes look-ahead. Old derived snapshots are invalid and
-        // are rebuilt from the already-downloaded historical data.
-        if(prefs.getInt("causal_model_version",0)<2){
+        // Algorithm v3 introduces a real event-level first signal for BOTH
+        // positive and negative days. Old derived snapshots are rebuilt from the
+        // already-downloaded historical data; Daily history is not downloaded again.
+        if(prefs.getInt("causal_model_version",0)<3){
             dao.deleteAllPreQueueSnapshots()
             prefs.edit()
                 .clear()
-                .putInt("causal_model_version",2)
+                .putInt("causal_model_version",3)
                 .putString(
                     "status",
-                    "مدل علّی جدید فعال شد؛ Walk-Forward از داده تاریخی موجود بازسازی می‌شود"
+                    "Causal Signal Engine v3 فعال شد؛ SignalEventها از تاریخچه موجود بازسازی می‌شوند"
                 )
                 .apply()
         }
@@ -225,7 +226,42 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 )
             }
         }else if(status=="NOT_QUEUE" || status=="FRAGILE_QUEUE"){
-            // Negative samples are evaluated at fixed intraday moments.
+            // Negative days are replayed chronologically as well. If the model
+            // crosses the threshold, that exact first crossing is a real FP
+            // SignalEvent (minutesBefore=0, label=0).
+            var firstAlert:Pair<Book,Metrics>?=null
+            var lastEvaluatedTime=0
+
+            for(now in books){
+                if(lastEvaluatedTime!=0 && secondsBetween(lastEvaluatedTime,now.time)<55) continue
+                val base=books.lastOrNull{
+                    it.time<=minusMinutes(now.time,5)
+                } ?: books.first()
+                val metrics=scoreSnapshot(now,base,yesterday)
+                lastEvaluatedTime=now.time
+
+                if(firstAlert==null && metrics.score>=70.0){
+                    firstAlert=now to metrics
+                }
+            }
+
+            firstAlert?.let{(alertBook,metrics)->
+                out += PreQueueSnapshotEntity(
+                    insCode=insCode,
+                    date=date,
+                    minutesBefore=0,
+                    snapshotTime=alertBook.time,
+                    score=metrics.score,
+                    bidImbalance=metrics.imbalance,
+                    bidGrowth=metrics.bidGrowth,
+                    askDrop=metrics.askDrop,
+                    pricePressure=metrics.pricePressure,
+                    label=0,
+                    detected=true
+                )
+            }
+
+            // Fixed negative checkpoints remain only for calibration diagnostics.
             val negatives=listOf(
                 -100 to 100000,
                 -200 to 110000,
@@ -313,6 +349,16 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         return Metrics(score,imbalance,bidGrowth,askDrop,pricePressure)
     }
 
+    private fun minutesBetween(a:Int,b:Int):Int{
+        fun sec(v:Int):Int{
+            val h=v/10000
+            val m=(v/100)%100
+            val s=v%100
+            return h*3600+m*60+s
+        }
+        return ((sec(b)-sec(a))/60).coerceAtLeast(0)
+    }
+
     private fun secondsBetween(a:Int,b:Int):Int{
         fun sec(v:Int):Int{
             val h=v/10000
@@ -373,24 +419,84 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 )
             }
         }
-        val precisionCursor=db.query("""
+        // EVENT-LEVEL metrics. minutesBefore=0 is the exact first signal,
+        // not one of the 30/20/15/10/5 evaluation checkpoints.
+        val eventMetrics=db.query("""
             SELECT
-              SUM(CASE WHEN label=1 AND detected=1 THEN 1 ELSE 0 END),
-              SUM(CASE WHEN label=0 AND detected=1 THEN 1 ELSE 0 END)
-            FROM prequeue_snapshots
-            WHERE label IN (0,1)
+              SUM(CASE WHEN p.label=1 AND p.detected=1 THEN 1 ELSE 0 END) AS tp,
+              SUM(CASE WHEN p.label=0 AND p.detected=1 THEN 1 ELSE 0 END) AS fp
+            FROM prequeue_snapshots p
+            WHERE p.minutesBefore=0
         """.trimIndent())
-        precisionCursor.use{
+        var eventTp=0
+        var eventFp=0
+        eventMetrics.use{
             if(it.moveToFirst()){
-                val tp=if(it.isNull(0))0 else it.getInt(0)
-                val fp=if(it.isNull(1))0 else it.getInt(1)
-                edit.putInt("true_positive",tp)
-                edit.putFloat(
-                    "precision",
-                    if(tp+fp>0) tp.toFloat()/(tp+fp).toFloat() else 0f
-                )
+                eventTp=if(it.isNull(0))0 else it.getInt(0)
+                eventFp=if(it.isNull(1))0 else it.getInt(1)
             }
         }
+
+        // A false negative is an evaluable confirmed queue day with positive
+        // snapshots, but with no first-signal record.
+        val fnCursor=db.query("""
+            SELECT COUNT(*)
+            FROM queue_events e
+            WHERE e.status='QUEUE_CONFIRMED'
+              AND EXISTS(
+                SELECT 1 FROM prequeue_snapshots x
+                WHERE x.insCode=e.insCode AND x.date=e.date AND x.label=1
+              )
+              AND NOT EXISTS(
+                SELECT 1 FROM prequeue_snapshots s
+                WHERE s.insCode=e.insCode AND s.date=e.date
+                  AND s.minutesBefore=0 AND s.label=1 AND s.detected=1
+              )
+        """.trimIndent())
+        val eventFn=fnCursor.use{
+            if(it.moveToFirst())it.getInt(0) else 0
+        }
+
+        edit.putInt("true_positive",eventTp)
+        edit.putInt("false_positive_event",eventFp)
+        edit.putInt("false_negative",eventFn)
+        edit.putFloat(
+            "precision",
+            if(eventTp+eventFp>0) eventTp.toFloat()/(eventTp+eventFp).toFloat() else 0f
+        )
+        edit.putFloat(
+            "recall",
+            if(eventTp+eventFn>0) eventTp.toFloat()/(eventTp+eventFn).toFloat() else 0f
+        )
+
+        // Lead time is calculated only after a signal has already been emitted.
+        val leadCursor=db.query("""
+            SELECT p.snapshotTime,e.eventTime
+            FROM prequeue_snapshots p
+            INNER JOIN queue_events e
+              ON e.insCode=p.insCode AND e.date=p.date
+            WHERE p.minutesBefore=0 AND p.label=1 AND p.detected=1
+              AND e.status='QUEUE_CONFIRMED' AND e.eventTime IS NOT NULL
+        """.trimIndent())
+        val leads=mutableListOf<Int>()
+        leadCursor.use{
+            while(it.moveToNext()){
+                val signalTime=it.getInt(0)
+                val queueTime=it.getInt(1)
+                val diff=minutesBetween(signalTime,queueTime)
+                if(diff>=0) leads += diff
+            }
+        }
+        leads.sort()
+        val medianLead=when{
+            leads.isEmpty() -> 0
+            leads.size%2==1 -> leads[leads.size/2]
+            else -> (leads[leads.size/2-1]+leads[leads.size/2])/2
+        }
+        val avgLead=if(leads.isNotEmpty()) leads.average().toFloat() else 0f
+        edit.putInt("median_lead_minutes",medianLead)
+        edit.putFloat("avg_lead_minutes",avgLead)
+        edit.putInt("signal_event_count",eventTp+eventFp)
 
         edit.putInt("snapshot_count",runCatching{daoCountSync()}.getOrDefault(0))
         edit.putLong("updated_at",System.currentTimeMillis())

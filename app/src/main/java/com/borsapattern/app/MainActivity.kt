@@ -129,6 +129,11 @@ class MainActivity:ComponentActivity(){
         var negativeTotal by remember{mutableStateOf(0)}
         var truePositive by remember{mutableStateOf(0)}
         var falsePositiveCount by remember{mutableStateOf(0)}
+        var falseNegativeCount by remember{mutableStateOf(0)}
+        var recallRate by remember{mutableStateOf(0f)}
+        var medianLeadMinutes by remember{mutableStateOf(0)}
+        var avgLeadMinutes by remember{mutableStateOf(0f)}
+        var signalEventCount by remember{mutableStateOf(0)}
 
         var specialReopenCount by remember{mutableStateOf(0)}
         var preopenDay1Excluded by remember{mutableStateOf(0)}
@@ -222,7 +227,15 @@ class MainActivity:ComponentActivity(){
                 total5=preQueuePrefs.getInt("total_5",0)
                 negativeTotal=preQueuePrefs.getInt("negative_total",0)
                 truePositive=preQueuePrefs.getInt("true_positive",0)
-                falsePositiveCount=preQueuePrefs.getInt("false_positive",0)
+                falsePositiveCount=preQueuePrefs.getInt(
+                    "false_positive_event",
+                    preQueuePrefs.getInt("false_positive",0)
+                )
+                falseNegativeCount=preQueuePrefs.getInt("false_negative",0)
+                recallRate=preQueuePrefs.getFloat("recall",0f)
+                medianLeadMinutes=preQueuePrefs.getInt("median_lead_minutes",0)
+                avgLeadMinutes=preQueuePrefs.getFloat("avg_lead_minutes",0f)
+                signalEventCount=preQueuePrefs.getInt("signal_event_count",0)
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
@@ -327,7 +340,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.8.6-safe",
+                                    "Signal • v2.9.0-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -427,7 +440,10 @@ class MainActivity:ComponentActivity(){
                             precisionRate=precisionRate,
                             preQueueSnapshots=preQueueSnapshots,
                             total30=total30,total20=total20,total15=total15,total10=total10,total5=total5,
-                            negativeTotal=negativeTotal,truePositive=truePositive,falsePositiveCount=falsePositiveCount
+                            negativeTotal=negativeTotal,truePositive=truePositive,falsePositiveCount=falsePositiveCount,
+                            falseNegativeCount=falseNegativeCount,recallRate=recallRate,
+                            medianLeadMinutes=medianLeadMinutes,avgLeadMinutes=avgLeadMinutes,
+                            signalEventCount=signalEventCount
                         )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
@@ -569,7 +585,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.8.6-safe",
+                        "v2.9.0-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -989,7 +1005,9 @@ class MainActivity:ComponentActivity(){
         precisionRate:Float,
         preQueueSnapshots:Int,
         total30:Int,total20:Int,total15:Int,total10:Int,total5:Int,
-        negativeTotal:Int,truePositive:Int,falsePositiveCount:Int
+        negativeTotal:Int,truePositive:Int,falsePositiveCount:Int,
+        falseNegativeCount:Int,recallRate:Float,
+        medianLeadMinutes:Int,avgLeadMinutes:Float,signalEventCount:Int
     ){
         var onlyContinuation by remember{mutableStateOf(true)}
         val continuation=history.filter{
@@ -1027,9 +1045,14 @@ class MainActivity:ComponentActivity(){
                         color=Color(0xFF777A86)
                     )
                     Text(
-                        "صف‌های قبل از ۰۹:۰۰ جدا هستند و موفقیت پیش‌بینی محسوب نمی‌شوند. نتیجه روز بعد فقط بعداً برای ارزیابی کیفیت سیگنال استفاده می‌شود.",
+                        "SignalEvent فقط در اولین عبور واقعی Score از آستانه ثبت می‌شود؛ بعداً زمان صف فقط برای محاسبه Lead Time استفاده می‌شود. صف‌های قبل از ۰۹:۰۰ موفقیت پیش‌بینی محسوب نمی‌شوند.",
                         fontSize=9.sp,
                         color=Color(0xFF118658)
+                    )
+                    Text(
+                        "TP=سیگنال و سپس صف معتبر • FP=سیگنال ولی بدون صف معتبر • FN=صف معتبر ولی بدون سیگنال قبلی",
+                        fontSize=9.sp,
+                        color=Color(0xFF5C35C8)
                     )
                     Spacer(Modifier.height(6.dp))
                     Row(
@@ -1048,21 +1071,35 @@ class MainActivity:ComponentActivity(){
                         horizontalArrangement=Arrangement.spacedBy(7.dp)
                     ){
                         MetricPill(
-                            "نمونه‌های زمانی",
-                            fa(preQueueSnapshots),
-                            Modifier.weight(1f)
-                        )
-                        MetricPill(
                             "Precision",
-                            "${fa((precisionRate*100).toInt())}٪ • TP ${fa(truePositive)} / FP ${fa(falsePositiveCount)}",
+                            "${fa((precisionRate*100).toInt())}٪",
                             Modifier.weight(1f)
                         )
                         MetricPill(
-                            "False Positive",
-                            "${fa((falsePositiveRate*100).toInt())}٪ • ${fa(negativeTotal)} نمونه منفی",
+                            "Recall",
+                            "${fa((recallRate*100).toInt())}٪",
+                            Modifier.weight(1f)
+                        )
+                        MetricPill(
+                            "پیش‌آگاهی میانه",
+                            "${fa(medianLeadMinutes)} دقیقه",
                             Modifier.weight(1f)
                         )
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)
+                    ){
+                        MetricPill("TP",fa(truePositive),Modifier.weight(1f))
+                        MetricPill("FP",fa(falsePositiveCount),Modifier.weight(1f))
+                        MetricPill("FN",fa(falseNegativeCount),Modifier.weight(1f))
+                    }
+                    Text(
+                        "SignalEvent واقعی: ${fa(signalEventCount)} • میانگین Lead Time: ${Jalali.digits(String.format(Locale.US,"%.1f",avgLeadMinutes))} دقیقه • Snapshot تشخیصی: ${fa(preQueueSnapshots)}",
+                        fontSize=9.sp,
+                        color=Color(0xFF777A86)
+                    )
                 }
             }
 
@@ -1965,7 +2002,7 @@ class MainActivity:ComponentActivity(){
                         PolishedCard{
                             Text("تایم‌لاین هشدار قبل از صف",fontSize=16.sp,fontWeight=FontWeight.Black)
                             Text(
-                                "امتیاز در ۳۰، ۲۰، ۱۵، ۱۰ و ۵ دقیقه قبل از تشکیل واقعی صف",
+                                "اولین SignalEvent واقعی + روند امتیازهای ۳۰، ۲۰، ۱۵، ۱۰ و ۵ دقیقه قبل از صف",
                                 fontSize=10.sp,color=Color(0xFF777A86)
                             )
                         }
@@ -2013,22 +2050,35 @@ class MainActivity:ComponentActivity(){
                                         it.minutesBefore==0 &&
                                         it.detected
                                     }
+                                val firstNegativeSignalForDay=preQueue
+                                    .firstOrNull{
+                                        it.date==s.date &&
+                                        it.label==0 &&
+                                        it.minutesBefore==0 &&
+                                        it.detected
+                                    }
 
                                 Text(
                                     when(s.status){
                                         "QUEUE_CONFIRMED" ->
                                             if(firstDetectedForDay!=null)
-                                                "اولین هشدار ${fmtTime(firstDetectedForDay.snapshotTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${leadMinutesText(firstDetectedForDay.snapshotTime,s.eventTime)}"
+                                                "🟢 SignalEvent ${fmtTime(firstDetectedForDay.snapshotTime)} • Score ${fa(firstDetectedForDay.score.toInt())}/۱۰۰ • صف ${fmtTime(s.eventTime)} • Lead ${leadMinutesText(firstDetectedForDay.snapshotTime,s.eventTime)} • TP"
                                             else
-                                                "صف ${fmtTime(s.eventTime)} • در شبیه‌سازی رو‌به‌جلو هشدار قبلی ثبت نشد"
+                                                "🔴 صف ${fmtTime(s.eventTime)} • SignalEvent قبلی ثبت نشد • FN"
                                         "FRAGILE_QUEUE" ->
-                                            "صف شکننده ${fmtTime(s.eventTime)} • از سیگنال مثبت حذف شده"
+                                            if(firstNegativeSignalForDay!=null)
+                                                "🟠 SignalEvent ${fmtTime(firstNegativeSignalForDay.snapshotTime)} • Score ${fa(firstNegativeSignalForDay.score.toInt())}/۱۰۰ • صف شکننده شد • FP"
+                                            else
+                                                "صف شکننده ${fmtTime(s.eventTime)} • SignalEvent مثبت صادر نشد"
                                         "PREOPEN_QUEUE" ->
                                             "صف از قبلِ ۹ وجود داشته • از روز سیگنال حذف شده"
                                         "SPECIAL_REOPEN" ->
                                             "بازگشایی ویژه • از مدل اصلی حذف شده"
                                         "NOT_QUEUE" ->
-                                            "کاندید بررسی شد • صف پایدار تشکیل نشد"
+                                            if(firstNegativeSignalForDay!=null)
+                                                "🔴 SignalEvent ${fmtTime(firstNegativeSignalForDay.snapshotTime)} • Score ${fa(firstNegativeSignalForDay.score.toInt())}/۱۰۰ • صف معتبر تشکیل نشد • FP"
+                                            else
+                                                "کاندید بررسی شد • SignalEvent صادر نشد • True Negative"
                                         "ERROR" ->
                                             "تحلیل این رخداد نیازمند تلاش مجدد است"
                                         else ->

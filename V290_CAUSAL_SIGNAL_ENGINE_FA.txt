@@ -1,0 +1,73 @@
+Signal v2.9.0-safe — Causal Signal Engine
+
+این نسخه روی شاخه سالم v2.8.6 ساخته شده و هیچ Foreground Service یا Migration جدید Room ندارد.
+
+1) SignalEvent واقعی
+- اولین عبور واقعی Score از آستانه 70 به عنوان SignalEvent ثبت می‌شود.
+- زمان SignalEvent دیگر از زمان تشکیل صف استخراج یا حدس زده نمی‌شود.
+- SignalEvent در prequeue_snapshots با minutesBefore=0 ذخیره می‌شود.
+- برای سهم مثبت و نمونه منفی هر دو، شبیه‌سازی از 09:00 رو به جلو انجام می‌شود.
+
+2) TP / FP / FN واقعی در سطح رخداد
+TP:
+  SignalEvent صادر شده و بعداً صف خرید معتبر تشکیل شده.
+FP:
+  SignalEvent صادر شده ولی صف معتبر تشکیل نشده یا صف شکننده بوده.
+FN:
+  صف خرید معتبر تشکیل شده ولی قبل از آن SignalEvent صادر نشده.
+TN:
+  در نمونه منفی SignalEvent صادر نشده.
+
+3) Precision و Recall
+- Precision = TP / (TP + FP)
+- Recall = TP / (TP + FN)
+- دیگر Precision از تک‌تک checkpointهای 30/20/15/10/5 دقیقه چندبار شمرده نمی‌شود.
+- معیارهای اصلی در سطح «رخداد» محاسبه می‌شوند.
+
+4) Lead Time واقعی
+برای هر TP:
+  First Signal Time -> Queue Start Time
+محاسبه می‌شود.
+- Median Lead Time
+- Average Lead Time
+در صفحه بک‌تست نمایش داده می‌شوند.
+
+5) Timeline هر سهم
+در صفحه جستجوی نماد، minutesBefore=0 نیز از دیتابیس خوانده می‌شود.
+برای هر روز نمونه:
+  SignalEvent HH:MM
+  Score هنگام اولین Signal
+  زمان واقعی صف
+  Lead Time
+  TP / FP / FN
+نمایش داده می‌شود.
+برای NOT_QUEUE و FRAGILE_QUEUE نیز اگر SignalEvent صادر شده باشد FP مشخص می‌شود.
+
+6) Checkpointها
+30/20/15/10/5 دقیقه همچنان برای ارزیابی زمانی باقی هستند.
+اما SignalEvent واقعی مستقل از این checkpointها و با حرکت chronological ساخته می‌شود.
+
+7) No-Look-Ahead حفظ شده
+- شبیه‌سازی فقط از گذشته به آینده است.
+- day.high وارد Score نمی‌شود.
+- زمان صف فقط بعد از صدور Signal برای Lead Time استفاده می‌شود.
+- نتیجه روز بعد فقط Outcome ارزیابی است و Feature نیست.
+
+8) Negative Replay
+نسخه قبل نمونه‌های منفی را فقط در ساعت‌های ثابت بررسی می‌کرد.
+در v2.9.0 روزهای منفی نیز از 09:00 تا پایان بازار رو‌به‌جلو replay می‌شوند.
+اولین عبور از Threshold یک FP SignalEvent واقعی می‌سازد.
+
+9) بدون دانلود مجدد Daily History
+causal_model_version=3 است.
+در اولین تحلیل این نسخه فقط prequeue_snapshots مشتق‌شده پاک و از داده تاریخی موجود بازسازی می‌شوند.
+
+10) امکانات v2.8.6 حفظ شده
+- Universe Audit
+- حذف کامل اختیار/درآمد ثابت/اوراق/تسه/حق تقدم و ابزارهای غیرهدف
+- Metadata incremental
+- چراغ ارتباط TSETMC
+- Sample Size کنار آمار زمان‌بندی
+
+versionCode=46
+versionName=2.9.0-safe

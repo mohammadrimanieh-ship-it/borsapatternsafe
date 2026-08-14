@@ -343,7 +343,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.1-safe",
+                                    "Signal • v2.9.1.1-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -588,7 +588,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.1-safe",
+                        "v2.9.1.1-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -665,7 +665,10 @@ class MainActivity:ComponentActivity(){
         var tsetmcConnected by remember{mutableStateOf<Boolean?>(null)}
         var tsetmcLastSuccess by remember{mutableStateOf<Long?>(null)}
         val healthClient=remember{TsetmcClient()}
-        val livePerf=remember{LocalContext.current.getSharedPreferences("live_perf",Context.MODE_PRIVATE)}
+        val localContext=LocalContext.current
+        val livePerf=remember(localContext){
+            localContext.getSharedPreferences("live_perf",Context.MODE_PRIVATE)
+        }
         LaunchedEffect(Unit){
             while(true){
                 nowTick=System.currentTimeMillis()

@@ -1,0 +1,12 @@
+Signal v2.9.1.1-safe
+
+رفع خطای Build نسخه 2.9.1 در MainActivity.kt line 668:
+@Composable invocations can only happen from the context of a @Composable function
+
+اصلاح:
+LocalContext.current ابتدا در خود Composable خوانده می‌شود و سپس
+SharedPreferences با remember(localContext) ساخته می‌شود.
+
+تمام قابلیت‌های v2.9.1 حفظ شده‌اند.
+versionCode=48
+versionName=2.9.1.1-safe

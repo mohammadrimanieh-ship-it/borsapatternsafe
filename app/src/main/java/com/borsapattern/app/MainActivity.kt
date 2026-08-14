@@ -122,6 +122,8 @@ class MainActivity:ComponentActivity(){
         var excludedFuture by remember{mutableStateOf(0)}
         var excludedCommodity by remember{mutableStateOf(0)}
         var excludedOtherFund by remember{mutableStateOf(0)}
+        var excludedSalaf by remember{mutableStateOf(0)}
+        var excludedTal by remember{mutableStateOf(0)}
         var total30 by remember{mutableStateOf(0)}
         var total20 by remember{mutableStateOf(0)}
         var total15 by remember{mutableStateOf(0)}
@@ -135,6 +137,7 @@ class MainActivity:ComponentActivity(){
         var medianLeadMinutes by remember{mutableStateOf(0)}
         var avgLeadMinutes by remember{mutableStateOf(0f)}
         var signalEventCount by remember{mutableStateOf(0)}
+        var allSignalEvents by remember{mutableStateOf<List<PreQueueSnapshotEntity>>(emptyList())}
 
         var specialReopenCount by remember{mutableStateOf(0)}
         var preopenDay1Excluded by remember{mutableStateOf(0)}
@@ -237,6 +240,7 @@ class MainActivity:ComponentActivity(){
                 medianLeadMinutes=preQueuePrefs.getInt("median_lead_minutes",0)
                 avgLeadMinutes=preQueuePrefs.getFloat("avg_lead_minutes",0f)
                 signalEventCount=preQueuePrefs.getInt("signal_event_count",0)
+                allSignalEvents=app.db.dao().allSignalEvents()
 
                 syncStatus=syncPrefs.getString("sync_status","آماده")?:"آماده"
                 syncDone=syncPrefs.getInt("sync_done",0)
@@ -266,6 +270,8 @@ class MainActivity:ComponentActivity(){
                 excludedFuture=catalogPrefs.getInt("excluded_future",0)
                 excludedCommodity=catalogPrefs.getInt("excluded_commodity",0)
                 excludedOtherFund=catalogPrefs.getInt("excluded_other_fund",0)
+                excludedSalaf=catalogPrefs.getInt("excluded_salaf",0)
+                excludedTal=catalogPrefs.getInt("excluded_tal",0)
                 delay(1200)
             }
         }
@@ -343,7 +349,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.1.1-safe",
+                                    "Signal • v${BuildConfig.VERSION_NAME}",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -446,7 +452,8 @@ class MainActivity:ComponentActivity(){
                             negativeTotal=negativeTotal,truePositive=truePositive,falsePositiveCount=falsePositiveCount,
                             falseNegativeCount=falseNegativeCount,recallRate=recallRate,
                             medianLeadMinutes=medianLeadMinutes,avgLeadMinutes=avgLeadMinutes,
-                            signalEventCount=signalEventCount
+                            signalEventCount=signalEventCount,
+                            signalEvents=allSignalEvents
                         )
                         2 -> SymbolSearchPage(
                             searchText,{searchText=it},searchResults,
@@ -470,7 +477,7 @@ class MainActivity:ComponentActivity(){
                             candidates,confirmed,preopenDay1Excluded,
                             fragileQueueCount,rejected,specialReopenCount,errors,
                             excludedOption,excludedFixedIncome,excludedHousing,excludedRight,
-                            excludedBond,excludedFuture,excludedCommodity,excludedOtherFund,
+                            excludedBond,excludedFuture,excludedCommodity,excludedOtherFund,excludedSalaf,excludedTal,
                             onMarkets={showMarkets=true},
                             onSymbolsUpdate={refreshSymbolCatalog()},
                             onStart={mode->
@@ -588,7 +595,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.1.1-safe",
+                        "v${BuildConfig.VERSION_NAME}",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -1024,7 +1031,8 @@ class MainActivity:ComponentActivity(){
         total30:Int,total20:Int,total15:Int,total10:Int,total5:Int,
         negativeTotal:Int,truePositive:Int,falsePositiveCount:Int,
         falseNegativeCount:Int,recallRate:Float,
-        medianLeadMinutes:Int,avgLeadMinutes:Float,signalEventCount:Int
+        medianLeadMinutes:Int,avgLeadMinutes:Float,signalEventCount:Int,
+        signalEvents:List<PreQueueSnapshotEntity>
     ){
         var onlyContinuation by remember{mutableStateOf(true)}
         val continuation=history.filter{
@@ -1035,6 +1043,7 @@ class MainActivity:ComponentActivity(){
         }
         val visible=if(onlyContinuation) continuation else history
         val grouped=visible.groupBy{it.date}.toSortedMap(compareByDescending{it})
+        val signalEventMap=signalEvents.associateBy{it.insCode to it.date}
 
         LazyColumn(
             verticalArrangement=Arrangement.spacedBy(12.dp),
@@ -1074,7 +1083,7 @@ class MainActivity:ComponentActivity(){
                         color=Color(0xFF777A86)
                     )
                     Text(
-                        "SignalEvent فقط در اولین عبور واقعی Score از آستانه ثبت می‌شود؛ بعداً زمان صف فقط برای محاسبه Lead Time استفاده می‌شود. صف‌های قبل از ۰۹:۰۰ موفقیت پیش‌بینی محسوب نمی‌شوند.",
+                        "نسخه جدید: Score≥70 ابتدا Watch است؛ SignalEvent فقط بعد از تأیید پایداری (یا Score بسیار قوی ≥90) صادر می‌شود. هدف کاهش FP است؛ زمان صف فقط بعداً برای Lead Time استفاده می‌شود.",
                         fontSize=9.sp,
                         color=Color(0xFF118658)
                     )
@@ -1364,7 +1373,7 @@ class MainActivity:ComponentActivity(){
                                                 )
                                             }
                                             Text(
-                                                "شروع صف: ${fmtTime(s.signalTime)}  •  ارزش بیشینه صف: ${
+                                                "شروع صف واقعی: ${fmtTime(s.eventTime)}  •  ارزش بیشینه صف: ${
                                                     if((s.queueValue?:0.0)>0)
                                                         fa(((s.queueValue?:0.0)/1_000_000_000.0).toInt())+" میلیارد"
                                                     else "—"
@@ -1378,6 +1387,21 @@ class MainActivity:ComponentActivity(){
                                                 fontSize=10.sp,
                                                 color=Color(0xFF666A78)
                                             )
+                                            val signalEvent=signalEventMap[s.insCode to s.date]
+                                            if(signalEvent!=null && s.eventTime!=null){
+                                                Text(
+                                                    "🔔 اولین سیگنال معتبر: ${fmtTime(signalEvent.snapshotTime)} • ${leadMinutesText(signalEvent.snapshotTime,s.eventTime)} قبل از صف • امتیاز ${fa(signalEvent.score.toInt())}/۱۰۰",
+                                                    fontSize=10.sp,
+                                                    color=Color(0xFF118658),
+                                                    fontWeight=FontWeight.Bold
+                                                )
+                                            }else if(s.status=="QUEUE_CONFIRMED"){
+                                                Text(
+                                                    "پیش از تشکیل صف SignalEvent معتبر ثبت نشده است",
+                                                    fontSize=10.sp,
+                                                    color=Color(0xFFB85A5A)
+                                                )
+                                            }
                                             s.nextDayReturnPct?.let{ret->
                                                 Text(
                                                     "بازده روز کاری بعد: ${if(ret>=0) "+" else ""}${Jalali.digits(String.format(Locale.US,"%.2f",ret))}٪",
@@ -1434,7 +1458,7 @@ class MainActivity:ComponentActivity(){
         candidatePending:Int,confirmedAfter9:Int,preopenExcluded:Int,
         fragileCount:Int,notQueueCount:Int,specialCount:Int,errorCount:Int,
         excludedOption:Int,excludedFixedIncome:Int,excludedHousing:Int,excludedRight:Int,
-        excludedBond:Int,excludedFuture:Int,excludedCommodity:Int,excludedOtherFund:Int,
+        excludedBond:Int,excludedFuture:Int,excludedCommodity:Int,excludedOtherFund:Int,excludedSalaf:Int,excludedTal:Int,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
         onStart:(String)->Unit,onAnalyze:()->Unit
     ){
@@ -1548,7 +1572,11 @@ class MainActivity:ComponentActivity(){
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
                         MetricPill("کالا",fa(excludedCommodity),Modifier.weight(1f)){auditCategory="COMMODITY"}
                         MetricPill("صندوق غیر اهرمی",fa(excludedOtherFund),Modifier.weight(1f)){auditCategory="OTHER_FUND"}
-                        MetricPill("در انتظار Metadata",fa(unknownCount),Modifier.weight(1f)){auditCategory="UNKNOWN"}
+                        MetricPill("سلف",fa(excludedSalaf),Modifier.weight(1f)){auditCategory="SALAF"}
+                    }
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
+                        MetricPill("TAL",fa(excludedTal),Modifier.weight(1f)){auditCategory="TAL"}
+                        MetricPill("در انتظار Metadata",fa(unknownCount),Modifier.weight(2f)){auditCategory="UNKNOWN"}
                     }
                     Spacer(Modifier.height(6.dp))
                     Surface(
@@ -2454,7 +2482,9 @@ class MainActivity:ComponentActivity(){
             "BOND" to "اوراق",
             "FUTURE" to "آتی",
             "COMMODITY" to "کالا",
-            "OTHER_FUND" to "صندوق غیر اهرمی"
+            "OTHER_FUND" to "صندوق غیر اهرمی",
+            "SALAF" to "سلف / سلف موازی",
+            "TAL" to "TAL / معاملات توافقی"
         )
         val title=titles[category] ?: category
         val filtered=remember(entries,search){

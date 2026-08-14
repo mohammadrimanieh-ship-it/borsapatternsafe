@@ -26,6 +26,7 @@ object MarketPrefs {
     const val TYPE_COMMODITY="TYPE_COMMODITY"
     const val TYPE_TAL="TYPE_TAL"
     const val TYPE_ENERGY="TYPE_ENERGY"
+    const val TYPE_SALAF="TYPE_SALAF"
 
     val allTypes=linkedSetOf(
         TYPE_STOCK,
@@ -85,6 +86,7 @@ object MarketPrefs {
         TYPE_COMMODITY -> "بورس کالا"
         TYPE_TAL -> "معاملات پایانی TAL"
         TYPE_ENERGY -> "انرژی"
+        TYPE_SALAF -> "سلف / سلف موازی"
         else -> "سایر"
     }
 
@@ -130,6 +132,8 @@ object MarketPrefs {
     }
 
     fun isLeveragedFund(symbol:String?,name:String?):Boolean{
+        // اختیارهای روی صندوق اهرمی (مثل ضهرم...) خودِ صندوق اهرمی نیستند.
+        if(isOptionInstrument(symbol,name,null)) return false
         val s=(symbol?:"").trim()
             .replace(" ","")
             .replace("\u200c","")
@@ -171,6 +175,7 @@ object MarketPrefs {
             TYPE_COMMODITY -> "COMMODITY"
             TYPE_TAL -> "TAL"
             TYPE_ENERGY -> "ENERGY"
+            TYPE_SALAF -> "SALAF"
             TYPE_FUND -> "OTHER_FUND"
             else -> null
         }
@@ -241,16 +246,23 @@ object MarketPrefs {
         flow:Int?,
         board:String?
     ):String{
-        val s=(symbol?:"").trim()
+        val s=(symbol?:"").trim().replace(" ","").replace("\u200c","")
         val n=(name?:"").trim()
         val b=(board?:"").trim()
         val text="$s $n $b"
 
         return when{
-            isLeveragedFund(s,n) -> TYPE_FUND
-
+            // نوع ابزار همیشه بر نام دارایی پایه اولویت دارد.
             isOptionInstrument(s,n,b) -> TYPE_OPTION
             isFixedIncomeInstrument(s,n,b) -> TYPE_BOND
+
+            // قراردادهای سلف / سلف موازی ابزار سهامی مدل اصلی نیستند.
+            text.contains("سلف") || text.contains("سلف موازی") -> TYPE_SALAF
+
+            // نمادهای TAL در داده‌های فعلی غالباً با پسوند 3/۳ می‌آیند.
+            text.contains("TAL",ignoreCase=true) ||
+                text.contains("معاملات پایانی") ||
+                ((s.endsWith("3") || s.endsWith("۳")) && s.length>2) -> TYPE_TAL
 
             b.contains("زرد") || b.contains("نارنجی") || b.contains("قرمز") ||
                 text.contains("بازار پایه") -> TYPE_BASE
@@ -264,6 +276,9 @@ object MarketPrefs {
 
             text.contains("آتی") || text.contains("قرارداد آتی") -> TYPE_FUTURE
 
+            // فقط پس از حذف قطعی اختیار/TAL/سلف اجازه تشخیص صندوق اهرمی داریم.
+            isLeveragedFund(s,n) -> TYPE_FUND
+
             text.contains("صندوق") ||
                 text.contains("ETF",ignoreCase=true) ||
                 text.contains("سرمایه گذاری قابل معامله") -> TYPE_FUND
@@ -271,9 +286,6 @@ object MarketPrefs {
             text.contains("بورس کالا") ||
                 text.contains("گواهی سپرده") ||
                 text.contains("کالایی") -> TYPE_COMMODITY
-
-            text.contains("TAL",ignoreCase=true) ||
-                text.contains("معاملات پایانی") -> TYPE_TAL
 
             text.contains("انرژی") ||
                 text.contains("بورس انرژی") -> TYPE_ENERGY

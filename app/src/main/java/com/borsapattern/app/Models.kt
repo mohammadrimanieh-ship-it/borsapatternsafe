@@ -498,6 +498,13 @@ interface BorsaDao {
     suspend fun preQueueSnapshotCount():Int
 
     @Query("""
+      SELECT * FROM prequeue_snapshots
+      WHERE minutesBefore=0 AND detected=1
+      ORDER BY date DESC
+    """)
+    suspend fun allSignalEvents():List<PreQueueSnapshotEntity>
+
+    @Query("""
       SELECT * FROM queue_events
       WHERE status='QUEUE_CONFIRMED' AND nextDayQueueStatus='PENDING'
       ORDER BY date ASC LIMIT :limit

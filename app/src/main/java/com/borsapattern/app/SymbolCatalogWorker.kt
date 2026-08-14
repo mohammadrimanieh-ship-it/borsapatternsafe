@@ -41,7 +41,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             val exclusionAudit=linkedMapOf(
                 "OPTION" to 0,"FIXED_INCOME" to 0,"HOUSING" to 0,"RIGHT" to 0,
                 "BOND" to 0,"FUTURE" to 0,"COMMODITY" to 0,"TAL" to 0,
-                "ENERGY" to 0,"OTHER_FUND" to 0
+                "SALAF" to 0,"ENERGY" to 0,"OTHER_FUND" to 0
             )
             val auditEntries=linkedMapOf<String,MutableSet<String>>()
             if(!finalizeOnly){
@@ -189,13 +189,19 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
                 if(!stockLike){
                     excluded++
-                    categoryEntries.getOrPut("OTHER"){linkedSetOf()}.add(line)
+                    val reason=MarketPrefs.exclusionReason(s.symbol,s.name,s.flow,s.boardTitle) ?: "OTHER"
+                    categoryEntries.getOrPut(reason){linkedSetOf()}.add(line)
                     continue
                 }
 
+                val boardKnown=!s.boardTitle.isNullOrBlank() && s.boardTitle!!.trim()!="-"
                 if(isLev){
                     leveraged++
                     categoryEntries.getOrPut("LEVERAGED"){linkedSetOf()}.add(line)
+                }else if(!boardKnown){
+                    // سهام عادی با بازار/تابلوی نامشخص مستقیماً وارد Universe نمی‌شود.
+                    unknownStockLike++
+                    categoryEntries.getOrPut("UNKNOWN"){linkedSetOf()}.add(line)
                 }else when(segment){
                     MarketPrefs.BOURSE -> {
                         bourse++
@@ -219,16 +225,20 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             for(key in listOf("BOURSE","FARABOURSE","BASE","LEVERAGED","UNKNOWN","OTHER")){
-                prefs.edit().putStringSet(
-                    "audit_$key",
-                    categoryEntries[key] ?: emptySet()
-                ).apply()
+                prefs.edit().putStringSet("audit_$key",categoryEntries[key] ?: emptySet()).apply()
+            }
+            // مواردی که فقط بعد از Metadata نوع واقعی‌شان روشن شده، به Audit حذف قطعی اضافه می‌شوند.
+            for(key in listOf("OPTION","FIXED_INCOME","HOUSING","RIGHT","BOND","FUTURE","COMMODITY","TAL","SALAF","ENERGY","OTHER_FUND")){
+                val oldItems=prefs.getStringSet("audit_$key",emptySet())?.toSet() ?: emptySet()
+                val resolved=categoryEntries[key]?.toSet() ?: emptySet()
+                if(resolved.isNotEmpty()) prefs.edit().putStringSet("audit_$key",oldItems+resolved).apply()
             }
 
             // بازار نامشخص فقط برای عیب‌یابی است و تا تکمیل متادیتا وارد Universe نمی‌شود.
             val eligible=bourse+farabourse+base+leveraged
             val rawCount=if(finalizeOnly) prefs.getInt("raw_count",current.size) else arr.length()
-            val excludedTotal=if(finalizeOnly) prefs.getInt("excluded_count",excluded) else rawExcludedThisRefresh+excluded
+            // در finalize، حذف‌های اولیه + ابزارهایی که بعد از Metadata شناسایی شدند هر دو حساب می‌شوند.
+            val excludedTotal=if(finalizeOnly) prefs.getInt("excluded_count",0)+excluded else rawExcludedThisRefresh+excluded
             val sourceErrors=if(finalizeOnly) prefs.getInt("source_error_count",0) else sourceErrorCount
             val duplicates=if(finalizeOnly) prefs.getInt("duplicate_count",0) else duplicateCount
             val reconciled=eligible+unknownStockLike+excludedTotal+sourceErrors+duplicates
@@ -249,14 +259,16 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putInt("reconciliation_delta",reconciliationDelta)
                 .putInt("source_error_count",sourceErrors)
                 .putInt("duplicate_count",duplicates)
-                .putInt("excluded_option",if(finalizeOnly) prefs.getInt("excluded_option",0) else exclusionAudit["OPTION"] ?: 0)
-                .putInt("excluded_fixed_income",if(finalizeOnly) prefs.getInt("excluded_fixed_income",0) else exclusionAudit["FIXED_INCOME"] ?: 0)
-                .putInt("excluded_housing",if(finalizeOnly) prefs.getInt("excluded_housing",0) else exclusionAudit["HOUSING"] ?: 0)
-                .putInt("excluded_right",if(finalizeOnly) prefs.getInt("excluded_right",0) else exclusionAudit["RIGHT"] ?: 0)
-                .putInt("excluded_bond",if(finalizeOnly) prefs.getInt("excluded_bond",0) else exclusionAudit["BOND"] ?: 0)
-                .putInt("excluded_future",if(finalizeOnly) prefs.getInt("excluded_future",0) else exclusionAudit["FUTURE"] ?: 0)
-                .putInt("excluded_commodity",if(finalizeOnly) prefs.getInt("excluded_commodity",0) else exclusionAudit["COMMODITY"] ?: 0)
-                .putInt("excluded_other_fund",if(finalizeOnly) prefs.getInt("excluded_other_fund",0) else exclusionAudit["OTHER_FUND"] ?: 0)
+                .putInt("excluded_option",if(finalizeOnly) prefs.getInt("excluded_option",0)+(categoryEntries["OPTION"]?.size ?: 0) else exclusionAudit["OPTION"] ?: 0)
+                .putInt("excluded_fixed_income",if(finalizeOnly) prefs.getInt("excluded_fixed_income",0)+(categoryEntries["FIXED_INCOME"]?.size ?: 0) else exclusionAudit["FIXED_INCOME"] ?: 0)
+                .putInt("excluded_housing",if(finalizeOnly) prefs.getInt("excluded_housing",0)+(categoryEntries["HOUSING"]?.size ?: 0) else exclusionAudit["HOUSING"] ?: 0)
+                .putInt("excluded_right",if(finalizeOnly) prefs.getInt("excluded_right",0)+(categoryEntries["RIGHT"]?.size ?: 0) else exclusionAudit["RIGHT"] ?: 0)
+                .putInt("excluded_bond",if(finalizeOnly) prefs.getInt("excluded_bond",0)+(categoryEntries["BOND"]?.size ?: 0) else exclusionAudit["BOND"] ?: 0)
+                .putInt("excluded_future",if(finalizeOnly) prefs.getInt("excluded_future",0)+(categoryEntries["FUTURE"]?.size ?: 0) else exclusionAudit["FUTURE"] ?: 0)
+                .putInt("excluded_commodity",if(finalizeOnly) prefs.getInt("excluded_commodity",0)+(categoryEntries["COMMODITY"]?.size ?: 0) else exclusionAudit["COMMODITY"] ?: 0)
+                .putInt("excluded_salaf",if(finalizeOnly) prefs.getInt("excluded_salaf",0)+(categoryEntries["SALAF"]?.size ?: 0) else exclusionAudit["SALAF"] ?: 0)
+                .putInt("excluded_tal",if(finalizeOnly) prefs.getInt("excluded_tal",0)+(categoryEntries["TAL"]?.size ?: 0) else exclusionAudit["TAL"] ?: 0)
+                .putInt("excluded_other_fund",if(finalizeOnly) prefs.getInt("excluded_other_fund",0)+(categoryEntries["OTHER_FUND"]?.size ?: 0) else exclusionAudit["OTHER_FUND"] ?: 0)
                 .putString(
                     "status",
                     if(finalizeOnly && reconciliationDelta!=0)

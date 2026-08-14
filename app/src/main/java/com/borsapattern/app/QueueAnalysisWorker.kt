@@ -207,13 +207,18 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 return
             }
 
+            // Pre-filter بسیار محافظه‌کار: در بازار عادی صف خرید نمی‌تواند در روزی رخ دهد
+            // که حتی سقف معامله روز از قیمت پایانی دیروز بالاتر نرفته است.
+            // این شرط هیچ داده آینده‌ای را وارد Signal Score نمی‌کند؛ فقط از درخواست سنگین
+            // BestLimits برای روزهای واضحاً نامرتبط جلوگیری می‌کند.
+            val yesterday=day.yesterday ?: 0.0
+            if(yesterday>0.0 && dayHigh<=yesterday){
+                dao.upsertEvents(listOf(e.copy(status="NOT_QUEUE",score=0.0,eventTime=null,signalTime=null)))
+                return
+            }
+
             val arr=try{
-                withTimeout(16_000L){
-                    api.jsonArrayFrom(
-                        api.bestLimitsRaw(e.insCode,e.date),
-                        "bestLimitsHistory","bestLimits"
-                    )
-                }
+                fetchBestLimits(e.insCode,e.date)
             }catch(_:TimeoutCancellationException){
                 markError(e,"ERROR_TIMEOUT")
                 return
@@ -371,6 +376,24 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
         }catch(_:Exception){
             markError(e,"ERROR_OTHER")
         }
+    }
+
+    private suspend fun fetchBestLimits(insCode:String,date:Int):org.json.JSONArray{
+        var last=org.json.JSONArray()
+        repeat(2){attempt->
+            try{
+                last=withTimeout(16_000L){
+                    api.jsonArrayFrom(api.bestLimitsRaw(insCode,date),"bestLimitsHistory","bestLimits")
+                }
+                if(last.length()>0) return last
+            }catch(e:TimeoutCancellationException){
+                if(attempt==1) throw e
+            }catch(e:Exception){
+                if(attempt==1) throw e
+            }
+            delay(350L)
+        }
+        return last
     }
 
     private suspend fun markError(e:QueueEventEntity,reason:String){

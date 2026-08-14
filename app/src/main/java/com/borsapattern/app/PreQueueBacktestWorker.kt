@@ -19,14 +19,14 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         // Algorithm v3 introduces a real event-level first signal for BOTH
         // positive and negative days. Old derived snapshots are rebuilt from the
         // already-downloaded historical data; Daily history is not downloaded again.
-        if(prefs.getInt("causal_model_version",0)<4){
+        if(prefs.getInt("causal_model_version",0)<5){
             dao.deleteAllPreQueueSnapshots()
             prefs.edit()
                 .clear()
-                .putInt("causal_model_version",4)
+                .putInt("causal_model_version",5)
                 .putString(
                     "status",
-                    "Causal Signal Engine v4 فعال شد؛ Walk-Forward قیفی و Metrics زنده بازسازی می‌شوند"
+                    "Causal Signal Engine v5 فعال شد؛ Watch→Confirm→Signal برای کاهش هشدار غلط"
                 )
                 .apply()
         }
@@ -197,6 +197,8 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             // a "good-looking" historical snapshot; it is used only afterwards to
             // measure how early an already-issued alert was.
             var firstAlert:Pair<Book,Metrics>?=null
+            var watchCandidate:Pair<Book,Metrics>?=null
+            var confirmStreak=0
             var lastEvaluatedTime=0
 
             for(now in books){
@@ -212,8 +214,29 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 val metrics=scoreSnapshot(now,base,yesterday)
                 lastEvaluatedTime=now.time
 
-                if(firstAlert==null && metrics.score>=70.0){
-                    firstAlert=now to metrics
+                if(firstAlert==null){
+                    // مرحله ۱: Watch از 70. مرحله ۲: Signal فقط با تأیید پایداری.
+                    // Score بسیار قوی (>=90) می‌تواند همان لحظه تأیید شود.
+                    if(metrics.score>=90.0){
+                        firstAlert=now to metrics
+                    }else if(metrics.score>=78.0){
+                        val previous=watchCandidate
+                        if(previous!=null && metrics.score>=previous.second.score-2.0){
+                            confirmStreak++
+                        }else{
+                            confirmStreak=1
+                        }
+                        watchCandidate=now to metrics
+                        if(confirmStreak>=2){
+                            firstAlert=now to metrics
+                        }
+                    }else if(metrics.score>=70.0){
+                        watchCandidate=now to metrics
+                        confirmStreak=0
+                    }else{
+                        watchCandidate=null
+                        confirmStreak=0
+                    }
                 }
             }
 
@@ -266,6 +289,8 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             // crosses the threshold, that exact first crossing is a real FP
             // SignalEvent (minutesBefore=0, label=0).
             var firstAlert:Pair<Book,Metrics>?=null
+            var watchCandidate:Pair<Book,Metrics>?=null
+            var confirmStreak=0
             var lastEvaluatedTime=0
 
             for(now in books){
@@ -276,8 +301,29 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                 val metrics=scoreSnapshot(now,base,yesterday)
                 lastEvaluatedTime=now.time
 
-                if(firstAlert==null && metrics.score>=70.0){
-                    firstAlert=now to metrics
+                if(firstAlert==null){
+                    // مرحله ۱: Watch از 70. مرحله ۲: Signal فقط با تأیید پایداری.
+                    // Score بسیار قوی (>=90) می‌تواند همان لحظه تأیید شود.
+                    if(metrics.score>=90.0){
+                        firstAlert=now to metrics
+                    }else if(metrics.score>=78.0){
+                        val previous=watchCandidate
+                        if(previous!=null && metrics.score>=previous.second.score-2.0){
+                            confirmStreak++
+                        }else{
+                            confirmStreak=1
+                        }
+                        watchCandidate=now to metrics
+                        if(confirmStreak>=2){
+                            firstAlert=now to metrics
+                        }
+                    }else if(metrics.score>=70.0){
+                        watchCandidate=now to metrics
+                        confirmStreak=0
+                    }else{
+                        watchCandidate=null
+                        confirmStreak=0
+                    }
                 }
             }
 
@@ -318,7 +364,7 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
                     askDrop=metrics.askDrop,
                     pricePressure=metrics.pricePressure,
                     label=0,
-                    detected=metrics.score>=70.0
+                    detected=metrics.score>=90.0
                 )
             }
         }

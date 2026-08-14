@@ -17,8 +17,8 @@ android {
         applicationId = "com.borsapattern.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 49
-        versionName = "3.0.0-safe"
+        versionCode = 50
+        versionName = "3.1.0-safe"
     }
 
     signingConfigs {

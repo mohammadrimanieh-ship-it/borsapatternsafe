@@ -4,7 +4,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 object PatternEngine {
-    private const val MODEL_VERSION=3
+    private const val MODEL_VERSION=4
 
     suspend fun rebuildCandidates(db:AppDatabase) {
         val sql=db.openHelper.writableDatabase
@@ -101,9 +101,12 @@ object PatternEngine {
                         val liquidEnough=
                             medianValue<=0.0 || value>=medianValue*0.35
 
+                        // A stock may form a real queue intraday and later lose it.
+                        // Therefore "last price close to daily high" must NOT be a gate.
+                        // We only use the daily high as a broad candidate detector;
+                        // BestLimits later decides whether a real queue existed.
                         val likelyQueueDay=
                             rise>=dynamicRiseThreshold &&
-                            closeToHigh>=0.985 &&
                             liquidEnough
 
                         if(likelyQueueDay){
@@ -111,13 +114,13 @@ object PatternEngine {
                                 ((rise-dynamicRiseThreshold)/0.04)
                                     .coerceIn(0.0,1.0)
                             val closeQuality=
-                                ((closeToHigh-0.985)/0.015)
+                                ((closeToHigh-0.90)/0.10)
                                     .coerceIn(0.0,1.0)
                             val seed=(
-                                52.0 +
-                                riseQuality*10.0 +
-                                closeQuality*8.0
-                            ).coerceIn(52.0,70.0)
+                                50.0 +
+                                riseQuality*12.0 +
+                                closeQuality*4.0
+                            ).coerceIn(50.0,68.0)
 
                             events += QueueEventEntity(
                                 insCode=ins,

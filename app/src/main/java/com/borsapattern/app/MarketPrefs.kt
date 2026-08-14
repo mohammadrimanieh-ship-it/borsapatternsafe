@@ -109,6 +109,43 @@ object MarketPrefs {
             knownAliases.contains(s)
     }
 
+    fun isDefinitelyExcluded(
+        symbol:String?,
+        name:String?,
+        flow:Int?,
+        board:String?
+    ):Boolean{
+        val type=classifyType(symbol,name,flow,board)
+        val leveraged=type==TYPE_FUND && isLeveragedFund(symbol,name)
+
+        if(leveraged) return false
+
+        return type in setOf(
+            TYPE_HOUSING,TYPE_RIGHT,TYPE_BOND,TYPE_OPTION,TYPE_FUTURE,
+            TYPE_COMMODITY,TYPE_TAL,TYPE_ENERGY,TYPE_FUND
+        )
+    }
+
+    fun isRawTargetCandidate(
+        symbol:String?,
+        name:String?,
+        flow:Int?,
+        board:String?
+    ):Boolean{
+        if(isDefinitelyExcluded(symbol,name,flow,board)) return false
+
+        val type=classifyType(symbol,name,flow,board)
+        if(type!=TYPE_STOCK && type!=TYPE_BASE) return false
+
+        val segment=classify(flow,board)
+        // Recognized stock markets are immediately accepted. Unknown stock-like
+        // rows are kept only when they at least carry a usable symbol/name so
+        // MetadataWorker can quarantine/resolve them without importing opaque junk.
+        return segment!=OTHER ||
+            !symbol.isNullOrBlank() ||
+            !name.isNullOrBlank()
+    }
+
     fun isSignalUniverse(
         segment:String,
         instrumentType:String,

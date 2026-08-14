@@ -130,6 +130,21 @@ interface BorsaDao {
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun upsertScores(items:List<LiveScoreEntity>)
     @Insert suspend fun insertPaperTrade(item:PaperTradeEntity):Long
 
+    @Query("DELETE FROM prequeue_snapshots WHERE insCode IN (:codes)")
+    suspend fun deletePreQueueByCodes(codes:List<String>)
+
+    @Query("DELETE FROM queue_events WHERE insCode IN (:codes)")
+    suspend fun deleteEventsByCodes(codes:List<String>)
+
+    @Query("DELETE FROM daily WHERE insCode IN (:codes)")
+    suspend fun deleteDailyByCodes(codes:List<String>)
+
+    @Query("DELETE FROM live_scores WHERE insCode IN (:codes)")
+    suspend fun deleteLiveByCodes(codes:List<String>)
+
+    @Query("DELETE FROM symbols WHERE insCode IN (:codes)")
+    suspend fun deleteSymbolsByCodes(codes:List<String>)
+
     @Query("SELECT COUNT(*) FROM symbols") suspend fun symbolCount():Int
     @Query("SELECT COUNT(*) FROM daily") suspend fun dailyCount():Int
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='CANDIDATE'") suspend fun candidateCount():Int

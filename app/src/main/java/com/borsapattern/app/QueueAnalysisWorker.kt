@@ -13,10 +13,10 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
     override suspend fun doWork():Result=coroutineScope{
         val modelVersion=prefs.getInt("analysis_model_version",0)
-        if(modelVersion<7){
+        if(modelVersion<8){
             prefs.edit()
                 .putBoolean("analysis_running",true)
-                .putString("analysis_status","بازسازی کاندیدهای سبک و شروع تحلیل صف پایدار")
+                .putString("analysis_status","بازسازی جامع کاندیدهای روزانه؛ صف‌های شکسته بعد از تشکیل هم بررسی می‌شوند")
                 .apply()
             val db=(applicationContext as BorsaApp).db
             db.openHelper.writableDatabase.execSQL("DELETE FROM prequeue_snapshots")
@@ -27,7 +27,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .remove("analysis_total_all")
                 .remove("analysis_batch_done")
                 .remove("analysis_batch_total")
-                .putInt("analysis_model_version",7)
+                .putInt("analysis_model_version",8)
                 .apply()
         }else{
             PatternEngine.seedInitialEvents((applicationContext as BorsaApp).db)
@@ -73,7 +73,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             .putInt("analysis_batch_done",alreadyDone)
             .putString(
                 "analysis_status",
-                "تحلیل صف پایدار: $alreadyDone از $totalAll"
+                "بررسی کاندیدهای روزانه: $alreadyDone از $totalAll"
             )
             .apply()
 
@@ -92,9 +92,13 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                         .putInt("analysis_batch_total",totalAll)
                         .putString(
                             "analysis_status",
-                            "تحلیل صف پایدار: $cumulative از $totalAll"
+                            "بررسی کاندیدهای روزانه: $cumulative از $totalAll"
                         )
                         .apply()
+                    val audit=prefs.edit()
+                        .putInt("audit_candidate_total",totalAll)
+                        .putInt("audit_processed",cumulative)
+                    audit.apply()
                     setProgress(
                         workDataOf("processed" to cumulative,"total" to totalAll)
                     )
@@ -106,13 +110,23 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
         val remaining=dao.candidateCountFor(segments,types)
         val completed=(totalAll-remaining).coerceIn(0,totalAll)
         prefs.edit()
+            .putInt("audit_candidate_total",totalAll)
+            .putInt("audit_processed",completed)
+            .putInt("audit_confirmed_after9",dao.confirmedCount())
+            .putInt("audit_preopen",dao.preopenDay1Count())
+            .putInt("audit_fragile",dao.fragileQueueCount())
+            .putInt("audit_not_queue",dao.rejectedCount())
+            .putInt("audit_special",dao.specialReopenCount())
+            .putInt("audit_errors",dao.errorCount())
+            .apply()
+        prefs.edit()
             .putBoolean("analysis_running",remaining>0)
             .putInt("analysis_batch_done",completed)
             .putInt("analysis_batch_total",totalAll)
             .putString(
                 "analysis_status",
                 if(remaining>0)
-                    "تحلیل صف پایدار: $completed از $totalAll • $remaining باقی‌مانده"
+                    "بررسی کاندیدها: $completed از $totalAll • $remaining باقی‌مانده"
                 else
                     "صف پایدار روز اول کامل شد"
             )

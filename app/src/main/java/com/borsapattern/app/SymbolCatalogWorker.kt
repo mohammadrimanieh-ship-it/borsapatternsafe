@@ -17,7 +17,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putString(
                     "status",
                     if(finalizeOnly) "در حال ساخت Universe نهایی"
-                    else "در حال دریافت و تکمیل فهرست نمادها"
+                    else "به‌روزرسانی افزایشی فهرست نمادها"
                 )
                 .apply()
 
@@ -34,6 +34,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 return Result.success()
             }
 
+            var rawExcludedThisRefresh=0
             if(!finalizeOnly){
             val existing=dao.allSymbols().associateBy{it.insCode}
             val fresh=ArrayList<SymbolEntity>(arr.length())
@@ -67,6 +68,12 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
                 val type=MarketPrefs.classifyType(symbol,name,flow,board)
 
+                // v2.8.3: definite non-target instruments never enter the analysis DB.
+                if(!MarketPrefs.isRawTargetCandidate(symbol,name,flow,board)){
+                    rawExcludedThisRefresh++
+                    continue
+                }
+
                 fresh += SymbolEntity(
                     insCode=ins,
                     symbol=symbol,
@@ -79,6 +86,25 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             if(fresh.isNotEmpty()) dao.upsertSymbols(fresh)
+
+            // Incremental cleanup: old non-target rows from previous builds are removed
+            // together with their derived analysis rows. Historical rows of valid stocks
+            // are untouched.
+            val purgeCodes=dao.allSymbols()
+                .filter{
+                    MarketPrefs.isDefinitelyExcluded(
+                        it.symbol,it.name,it.flow,it.boardTitle
+                    )
+                }
+                .map{it.insCode}
+            for(chunk in purgeCodes.chunked(200)){
+                if(chunk.isEmpty()) continue
+                dao.deletePreQueueByCodes(chunk)
+                dao.deleteEventsByCodes(chunk)
+                dao.deleteDailyByCodes(chunk)
+                dao.deleteLiveByCodes(chunk)
+                dao.deleteSymbolsByCodes(chunk)
+            }
             }
             dao.repairLiveScoreNames()
 
@@ -129,14 +155,18 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             prefs.edit()
                 .putBoolean("running",false)
                 .putLong("last_refresh",System.currentTimeMillis())
-                .putInt("raw_count",all.size)
+                .putInt("raw_count",if(finalizeOnly) prefs.getInt("raw_count",all.size) else arr.length())
                 .putInt("eligible_count",eligible)
                 .putInt("bourse_count",bourse)
                 .putInt("farabourse_count",farabourse)
                 .putInt("base_count",base)
                 .putInt("leveraged_count",leveraged)
                 .putInt("unknown_count",unknownStockLike)
-                .putInt("excluded_count",excluded)
+                .putInt(
+                    "excluded_count",
+                    if(finalizeOnly) prefs.getInt("excluded_count",excluded)
+                    else rawExcludedThisRefresh+excluded
+                )
                 .putString(
                     "status",
                     if(finalizeOnly && unknownStockLike>0)

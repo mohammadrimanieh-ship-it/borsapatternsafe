@@ -13,15 +13,26 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
     private val catalogPrefs get()=applicationContext.getSharedPreferences("catalog",Context.MODE_PRIVATE)
 
     override suspend fun doWork():Result{
-        val batch=inputData.getInt("batch",60).coerceIn(20,80)
+        val batch=inputData.getInt("batch",60).coerceIn(20,100)
         val round=inputData.getInt("round",0)
-        val symbols=dao.symbolsNeedingMetadata(batch)
+        val quarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
+        val symbols=dao.symbolsNeedingMetadata(batch*4)
+            .filterNot{quarantine.contains(it.insCode)}
+            .take(batch)
         val live=dao.liveScoresNeedingName(batch)
+            .filterNot{quarantine.contains(it.insCode)}
+            .take(batch)
 
         if(symbols.isEmpty() && live.isEmpty()){
             dao.repairLiveScoreNames()
+            val qCount=prefs.getStringSet("quarantine_codes",emptySet())?.size ?: 0
             prefs.edit()
-                .putString("status","نام و بازار نمادها کامل شد")
+                .putString(
+                    "status",
+                    if(qCount>0)
+                        "به‌روزرسانی افزایشی کامل شد؛ $qCount مورد نامشخص در قرنطینه باقی ماند"
+                    else "نام و بازار نمادها کامل شد"
+                )
                 .putBoolean("running",false)
                 .apply()
 
@@ -51,6 +62,7 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         live.forEach{codes+=it.insCode}
 
         val fixed=AtomicInteger(0)
+        val unresolved=java.util.Collections.synchronizedSet(mutableSetOf<String>())
         coroutineScope{
             for(chunk in codes.take(batch).chunked(6)){
                 chunk.map{code->
@@ -62,11 +74,17 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
                                 rawSymbol=current?.symbol,rawName=current?.name,
                                 flow=current?.flow,board=current?.boardTitle
                             )
-                            if(
-                                !entity.symbol.isNullOrBlank() ||
-                                !entity.name.isNullOrBlank()
-                            ) fixed.incrementAndGet()
-                        }catch(_:Exception){}
+                            val complete=
+                                !entity.symbol.isNullOrBlank() &&
+                                !entity.name.isNullOrBlank() &&
+                                entity.flow!=null &&
+                                entity.segment!=MarketPrefs.OTHER
+                            if(complete) fixed.incrementAndGet()
+                            else unresolved += code
+                        }catch(_:Exception){
+                            // Network/transient errors are NOT quarantined; they can retry
+                            // in a later incremental pass.
+                        }
                     }
                 }.awaitAll()
                 yield()
@@ -75,13 +93,20 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
         dao.repairLiveScoreNames()
 
-        val remaining=dao.symbolsNeedingMetadata(1).isNotEmpty()
-        if(!remaining || round>=79){
+        if(unresolved.isNotEmpty()){
+            val merged=(quarantine + unresolved).take(1500).toSet()
+            prefs.edit().putStringSet("quarantine_codes",merged).apply()
+        }
+        val updatedQuarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
+        val remaining=dao.symbolsNeedingMetadata(batch*4)
+            .any{!updatedQuarantine.contains(it.insCode)}
+        if(!remaining || round>=20){
             dao.repairLiveScoreNames()
             prefs.edit()
                 .putString(
                     "status",
-                    if(remaining) "تکمیل متادیتا متوقف شد؛ بعضی نمادها از منبع بازار اطلاعات کافی ندارند"
+                    if(updatedQuarantine.isNotEmpty())
+                        "تکمیل افزایشی تمام شد؛ ${updatedQuarantine.size} مورد نامشخص در قرنطینه متادیتا هستند"
                     else "نام و بازار نمادها کامل شد"
                 )
                 .putBoolean("running",false)
@@ -100,7 +125,7 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         }
 
         prefs.edit()
-            .putString("status","این مرحله ${fixed.get()} نماد تکمیل شد؛ ادامه طبقه‌بندی در پس‌زمینه")
+            .putString("status","این مرحله ${fixed.get()} نماد جدید/ناقص تکمیل شد؛ موارد قبلی دوباره بررسی نمی‌شوند")
             .putBoolean("running",true)
             .apply()
         catalogPrefs.edit()

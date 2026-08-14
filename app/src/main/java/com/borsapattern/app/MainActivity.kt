@@ -293,7 +293,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.8.2-safe",
+                                    "Signal • v2.8.3-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -412,6 +412,8 @@ class MainActivity:ComponentActivity(){
                             analysisStatus,analysisDone,analysisTotal,
                             nextDayStatus,nextDayDone,nextDayTotal,
                             preQueueStatus,walkDone,walkTotal,
+                            candidates,confirmed,preopenDay1Excluded,
+                            fragileQueueCount,rejected,specialReopenCount,errors,
                             onMarkets={showMarkets=true},
                             onSymbolsUpdate={refreshSymbolCatalog()},
                             onStart={mode->
@@ -529,7 +531,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.8.2-safe",
+                        "v2.8.3-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -939,7 +941,7 @@ class MainActivity:ComponentActivity(){
                         color=Color(0xFF777A86)
                     )
                     Text(
-                        "این درصدها می‌گویند مدل در هر فاصله زمانی چند درصد از صف‌های واقعی را قبل از تشکیل دیده است؛ نتیجه روز بعد معیار جداگانه‌ای است.",
+                        "این درصدها فقط صف‌های معتبر بعد از ۰۹:۰۰ را می‌سنجند. صفی که از پیش‌گشایش وجود داشته، جدا ثبت می‌شود و موفقیت پیش‌بینی محسوب نمی‌شود.",
                         fontSize=10.sp,
                         color=Color(0xFF777A86)
                     )
@@ -1277,6 +1279,8 @@ class MainActivity:ComponentActivity(){
         analysisStatus:String,analysisDone:Int,analysisTotal:Int,
         nextDayStatus:String,nextDayDone:Int,nextDayTotal:Int,
         walkStatus:String,walkDone:Int,walkTotal:Int,
+        candidatePending:Int,confirmedAfter9:Int,preopenExcluded:Int,
+        fragileCount:Int,notQueueCount:Int,specialCount:Int,errorCount:Int,
         onMarkets:()->Unit,onSymbolsUpdate:()->Unit,
         onStart:(String)->Unit,onAnalyze:()->Unit
     ){
@@ -1313,8 +1317,12 @@ class MainActivity:ComponentActivity(){
                                 fontSize=10.sp,color=Color(0xFF91939D)
                             )
                         }
-                        TextButton(onClick=onSymbolsUpdate){Text("به‌روزرسانی نمادها")}
+                        TextButton(onClick=onSymbolsUpdate){Text("به‌روزرسانی افزایشی")}
                     }
+                    Text(
+                        "نمادهای کامل دوباره پردازش نمی‌شوند؛ فقط موارد جدید یا ناقص بررسی می‌شوند.",
+                        fontSize=9.sp,color=Color(0xFF118658)
+                    )
                     Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier.fillMaxWidth(),
@@ -1332,13 +1340,53 @@ class MainActivity:ComponentActivity(){
                             shape=RoundedCornerShape(12.dp)
                         ){
                             Text(
-                                "${fa(unknownCount)} نماد هنوز بازار مشخص ندارند و تا تکمیل متادیتا وارد Universe نمی‌شوند.",
+                                "${fa(unknownCount)} مورد stock-like هنوز بازار قطعی ندارند؛ در قرنطینه متادیتا می‌مانند و تحلیل سنگین نمی‌شوند.",
                                 Modifier.fillMaxWidth().padding(9.dp),
                                 fontSize=10.sp,
                                 color=Color(0xFF7B6517)
                             )
                         }
                     }
+                }
+            }
+
+            item{
+                PolishedCard{
+                    Text("Audit رخدادهای صف",fontSize=17.sp,fontWeight=FontWeight.Black)
+                    Text(
+                        "عدد کل تحلیل، «کاندید روز معاملاتی» است؛ بعد از BestLimits مشخص می‌شود واقعاً صف بوده یا نه.",
+                        fontSize=10.sp,color=Color(0xFF747785)
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(5.dp)
+                    ){
+                        MetricPill("کل کاندید",fa(analysisTotal),Modifier.weight(1f))
+                        MetricPill("باقی‌مانده",fa(candidatePending),Modifier.weight(1f))
+                        MetricPill("صف بعد از ۹",fa(confirmedAfter9),Modifier.weight(1f))
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement=Arrangement.spacedBy(5.dp)
+                    ){
+                        MetricPill("صف قبل از ۹",fa(preopenExcluded),Modifier.weight(1f))
+                        MetricPill("صف شکننده",fa(fragileCount),Modifier.weight(1f))
+                        MetricPill("اصلاً صف نبود",fa(notQueueCount),Modifier.weight(1f))
+                    }
+                    Text(
+                        "بازگشایی ویژه/بدون دامنه حذف‌شده: ${fa(specialCount)}",
+                        fontSize=9.sp,color=Color(0xFFD08B00)
+                    )
+                    if(errorCount>0){
+                        Text(
+                            "خطای تحلیل: ${fa(errorCount)} رخداد؛ این موارد در تلاش بعدی دوباره بررسی می‌شوند.",
+                            fontSize=9.sp,color=Color(0xFFB05B5B)
+                        )
+                    }
+                    Text(
+                        "Walk-Forward فقط روی صف‌های معتبر بعد از ۰۹:۰۰ و نمونه‌های منفی مناسب اجرا می‌شود؛ صف پیش‌گشایش وارد موفقیت اصلی مدل نمی‌شود.",
+                        fontSize=9.sp,color=Color(0xFF118658)
+                    )
                 }
             }
 
@@ -1451,7 +1499,7 @@ class MainActivity:ComponentActivity(){
                 PolishedCard{
                     Text("وضعیت تحلیل یکپارچه",fontSize=15.sp,fontWeight=FontWeight.Black)
                     ProcessCardInline(
-                        title="۱. صف پایدار روز اول",
+                        title="۱. بررسی کاندیدها و صف واقعی بعد از ۹",
                         status=analysisStatus,
                         done=analysisDone,
                         total=analysisTotal
@@ -1834,10 +1882,20 @@ class MainActivity:ComponentActivity(){
                                         fontWeight=FontWeight.Black
                                     )
                                 }
+                                val snapsForDay=preQueue
+                                    .filter{it.date==s.date && it.label==1}
+                                    .sortedByDescending{it.minutesBefore}
+                                val firstDetectedForDay=snapsForDay
+                                    .filter{it.detected}
+                                    .maxByOrNull{it.minutesBefore}
+
                                 Text(
                                     when(s.status){
                                         "QUEUE_CONFIRMED" ->
-                                            "هشدار ${fmtTime(s.signalTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${leadMinutesText(s.signalTime,s.eventTime)}"
+                                            if(firstDetectedForDay!=null)
+                                                "اولین هشدار ${fmtTime(firstDetectedForDay.snapshotTime)} • صف ${fmtTime(s.eventTime)} • پیش‌آگاهی ${fa(firstDetectedForDay.minutesBefore)} دقیقه"
+                                            else
+                                                "صف ${fmtTime(s.eventTime)} • قبل از صف هشدار معتبر ثبت نشد"
                                         "FRAGILE_QUEUE" ->
                                             "صف شکننده ${fmtTime(s.eventTime)} • از سیگنال مثبت حذف شده"
                                         "PREOPEN_QUEUE" ->
@@ -1896,9 +1954,7 @@ class MainActivity:ComponentActivity(){
                                         color=if(ret>=0) Color(0xFF118658) else Color(0xFFB85A5A)
                                     )
                                 }
-                                val snaps=preQueue
-                                    .filter{it.date==s.date && it.label==1}
-                                    .sortedByDescending{it.minutesBefore}
+                                val snaps=snapsForDay
                                 if(snaps.isNotEmpty()){
                                     Spacer(Modifier.height(4.dp))
                                     Text(
@@ -2354,7 +2410,7 @@ class MainActivity:ComponentActivity(){
     private fun refreshSymbolCatalog(){
         getSharedPreferences("catalog",Context.MODE_PRIVATE)
             .edit()
-            .putString("status","در حال به‌روزرسانی فهرست، نام و بازار نمادها")
+            .putString("status","به‌روزرسانی افزایشی: فقط نمادهای جدید/ناقص بررسی می‌شوند")
             .apply()
         val req=OneTimeWorkRequestBuilder<SymbolCatalogWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())

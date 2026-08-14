@@ -19,14 +19,14 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         // Algorithm v3 introduces a real event-level first signal for BOTH
         // positive and negative days. Old derived snapshots are rebuilt from the
         // already-downloaded historical data; Daily history is not downloaded again.
-        if(prefs.getInt("causal_model_version",0)<3){
+        if(prefs.getInt("causal_model_version",0)<4){
             dao.deleteAllPreQueueSnapshots()
             prefs.edit()
                 .clear()
-                .putInt("causal_model_version",3)
+                .putInt("causal_model_version",4)
                 .putString(
                     "status",
-                    "Causal Signal Engine v3 فعال شد؛ SignalEventها از تاریخچه موجود بازسازی می‌شوند"
+                    "Causal Signal Engine v4 فعال شد؛ Walk-Forward قیفی و Metrics زنده بازسازی می‌شوند"
                 )
                 .apply()
         }
@@ -34,10 +34,24 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val batch=inputData.getInt("batch",24).coerceIn(8,40)
         val sql=app.db.openHelper.readableDatabase
 
+        val funnelWhere="""
+            (
+              e.status='QUEUE_CONFIRMED'
+              OR (
+                e.status='FRAGILE_QUEUE'
+                AND ABS((e.date + CAST(substr(e.insCode,-6) AS INTEGER)) % 2)=0
+              )
+              OR (
+                e.status='NOT_QUEUE'
+                AND ABS((e.date + CAST(substr(e.insCode,-6) AS INTEGER)) % 5)=0
+              )
+            )
+        """.trimIndent()
+
         val c=sql.query("""
             SELECT e.insCode,e.date,e.eventTime,e.status
             FROM queue_events e
-            WHERE e.status IN ('QUEUE_CONFIRMED','NOT_QUEUE','FRAGILE_QUEUE')
+            WHERE $funnelWhere
               AND NOT EXISTS(
                 SELECT 1 FROM prequeue_snapshots p
                 WHERE p.insCode=e.insCode AND p.date=e.date
@@ -64,25 +78,30 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         if(items.isEmpty()){
             rebuildMetrics()
             val done=dao.walkForwardProcessedCount()
-            val total=dao.walkForwardEligibleCount()
+            val total=funnelTotal()
             prefs.edit()
                 .putBoolean("running",false)
+                .putBoolean("metrics_partial",false)
                 .putInt("events_done",done)
                 .putInt("events_total",total)
-                .putString("status","Walk-Forward کامل شد: $done از $total رخداد")
+                .putString("status","Walk-Forward قیفی کامل شد: $done از $total رخداد")
                 .apply()
             return Result.success()
         }
 
-        val total=dao.walkForwardEligibleCount()
+        val total=funnelTotal()
         prefs.edit()
             .putBoolean("running",true)
             .putInt("events_total",total)
             .putInt("events_done",dao.walkForwardProcessedCount())
-            .putString("status","Walk-Forward علّی: هر Snapshot فقط با داده همان لحظه و قبل از آن")
+            .putBoolean("metrics_partial",true)
+            .putString(
+                "status",
+                "Walk-Forward قیفی: همه صف‌های معتبر + ۵۰٪ صف شکننده + ۲۰٪ نمونه‌های بدون صف"
+            )
             .apply()
 
-        for(item in items){
+        for((index,item) in items.withIndex()){
             try{
                 analyzeDay(item.insCode,item.date,item.eventTime,item.status)
             }catch(_:Exception){
@@ -90,12 +109,18 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
             }
             val done=dao.walkForwardProcessedCount()
             prefs.edit()
+                .putBoolean("metrics_partial",true)
                 .putInt("events_done",done)
                 .putInt("events_total",total)
-                .putString("status","Walk-Forward بدون Look-Ahead: $done از $total رخداد")
+                .putString(
+                    "status",
+                    "Walk-Forward قیفی: $done از $total • آمار پایین موقت و زنده است"
+                )
                 .apply()
+            if((index+1)%6==0) rebuildMetrics()
             setProgress(workDataOf("done" to done,"total" to total))
         }
+        rebuildMetrics()
 
         val next=OneTimeWorkRequestBuilder<PreQueueBacktestWorker>()
             .setConstraints(HistoricalWorker.networkConstraint())
@@ -374,6 +399,24 @@ class PreQueueBacktestWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx
         val m=(time/100)%100
         val total=(h*60+m-mins).coerceAtLeast(0)
         return (total/60)*10000 + (total%60)*100
+    }
+
+    private fun funnelTotal():Int{
+        val c=app.db.openHelper.readableDatabase.query("""
+            SELECT COUNT(*)
+            FROM queue_events e
+            WHERE
+              e.status='QUEUE_CONFIRMED'
+              OR (
+                e.status='FRAGILE_QUEUE'
+                AND ABS((e.date + CAST(substr(e.insCode,-6) AS INTEGER)) % 2)=0
+              )
+              OR (
+                e.status='NOT_QUEUE'
+                AND ABS((e.date + CAST(substr(e.insCode,-6) AS INTEGER)) % 5)=0
+              )
+        """.trimIndent())
+        return c.use{if(it.moveToFirst())it.getInt(0) else 0}
     }
 
     private fun rebuildMetrics(){

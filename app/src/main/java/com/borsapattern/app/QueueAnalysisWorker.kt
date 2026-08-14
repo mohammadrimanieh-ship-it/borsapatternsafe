@@ -27,6 +27,12 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .remove("analysis_total_all")
                 .remove("analysis_batch_done")
                 .remove("analysis_batch_total")
+                .remove("audit_error_daily")
+                .remove("audit_error_bestlimits_empty")
+                .remove("audit_error_timeout")
+                .remove("audit_error_fetch")
+                .remove("audit_error_book_parse")
+                .remove("audit_error_other")
                 .putInt("analysis_model_version",8)
                 .apply()
         }else{
@@ -109,6 +115,7 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
         val remaining=dao.candidateCountFor(segments,types)
         val completed=(totalAll-remaining).coerceIn(0,totalAll)
+        refreshErrorAudit()
         prefs.edit()
             .putInt("audit_candidate_total",totalAll)
             .putInt("audit_processed",completed)
@@ -193,16 +200,30 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 return
             }
 
-            val dayHigh=dao.dailyFor(e.insCode,e.date)?.high ?: 0.0
-            val arr=withTimeout(16_000L){
-                api.jsonArrayFrom(
-                    api.bestLimitsRaw(e.insCode,e.date),
-                    "bestLimitsHistory","bestLimits"
-                )
+            val day=dao.dailyFor(e.insCode,e.date)
+            val dayHigh=day?.high ?: 0.0
+            if(day==null || dayHigh<=0.0){
+                markError(e,"ERROR_DAILY_MISSING")
+                return
+            }
+
+            val arr=try{
+                withTimeout(16_000L){
+                    api.jsonArrayFrom(
+                        api.bestLimitsRaw(e.insCode,e.date),
+                        "bestLimitsHistory","bestLimits"
+                    )
+                }
+            }catch(_:TimeoutCancellationException){
+                markError(e,"ERROR_TIMEOUT")
+                return
+            }catch(_:Exception){
+                markError(e,"ERROR_FETCH_OR_PARSE")
+                return
             }
 
             if(arr.length()==0){
-                dao.upsertEvents(listOf(e.copy(status="NOT_QUEUE")))
+                markError(e,"ERROR_BESTLIMITS_EMPTY")
                 return
             }
 
@@ -267,6 +288,11 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 )
             }
             states.sortBy{it.time}
+
+            if(states.isEmpty()){
+                markError(e,"ERROR_BOOK_PARSE")
+                return
+            }
 
             val firstIdx=states.indexOfFirst{it.isQueue}
             if(firstIdx<0){
@@ -343,8 +369,32 @@ class QueueAnalysisWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 )
             )
         }catch(_:Exception){
-            dao.upsertEvents(listOf(e.copy(status="ERROR")))
+            markError(e,"ERROR_OTHER")
         }
+    }
+
+    private suspend fun markError(e:QueueEventEntity,reason:String){
+        dao.upsertEvents(
+            listOf(
+                e.copy(
+                    status="ERROR",
+                    nextDayQueueStatus=reason
+                )
+            )
+        )
+        refreshErrorAudit()
+    }
+
+    private suspend fun refreshErrorAudit(){
+        prefs.edit()
+            .putInt("audit_errors",dao.errorCount())
+            .putInt("audit_error_daily",dao.errorReasonCount("ERROR_DAILY_MISSING"))
+            .putInt("audit_error_bestlimits_empty",dao.errorReasonCount("ERROR_BESTLIMITS_EMPTY"))
+            .putInt("audit_error_timeout",dao.errorReasonCount("ERROR_TIMEOUT"))
+            .putInt("audit_error_fetch",dao.errorReasonCount("ERROR_FETCH_OR_PARSE"))
+            .putInt("audit_error_book_parse",dao.errorReasonCount("ERROR_BOOK_PARSE"))
+            .putInt("audit_error_other",dao.errorReasonCount("ERROR_OTHER"))
+            .apply()
     }
 
     private fun enqueueNextDay(){

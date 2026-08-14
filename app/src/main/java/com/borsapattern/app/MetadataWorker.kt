@@ -21,24 +21,26 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         }
         val batch=inputData.getInt("batch",80).coerceIn(20,120)
         val round=inputData.getInt("round",0)
-        val quarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
-        val symbols=dao.symbolsNeedingMetadata(batch*4)
-            .filterNot{quarantine.contains(it.insCode)}
-            .take(batch)
-        val live=dao.liveScoresNeedingName(batch)
-            .filterNot{quarantine.contains(it.insCode)}
-            .take(batch)
+
+        // Resolver v4: unresolved instruments are never permanently suppressed.
+        // We rotate through the whole unresolved pool so the first difficult rows
+        // cannot block later genuine stocks.
+        val pool=dao.symbolsNeedingMetadata(5000)
+        val symbols=if(pool.isEmpty()) emptyList() else{
+            val start=((round*batch)%pool.size).coerceAtLeast(0)
+            (pool.drop(start)+pool.take(start)).take(batch)
+        }
+        val livePool=dao.liveScoresNeedingName(1200)
+        val live=if(livePool.isEmpty()) emptyList() else{
+            val start=((round*batch)%livePool.size).coerceAtLeast(0)
+            (livePool.drop(start)+livePool.take(start)).take(batch)
+        }
 
         if(symbols.isEmpty() && live.isEmpty()){
             dao.repairLiveScoreNames()
-            val qCount=prefs.getStringSet("quarantine_codes",emptySet())?.size ?: 0
             prefs.edit()
-                .putString(
-                    "status",
-                    if(qCount>0)
-                        "به‌روزرسانی افزایشی کامل شد؛ $qCount مورد نامشخص در قرنطینه باقی ماند"
-                    else "نام و بازار نمادها کامل شد"
-                )
+                .remove("quarantine_codes")
+                .putString("status","نام و بازار همه موارد قابل‌حل کامل شد")
                 .putBoolean("running",false)
                 .apply()
 
@@ -99,20 +101,27 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
 
         dao.repairLiveScoreNames()
 
-        if(unresolved.isNotEmpty() && round>=2){
-            val merged=(quarantine + unresolved).take(2500).toSet()
-            prefs.edit().putStringSet("quarantine_codes",merged).apply()
-        }
-        val updatedQuarantine=prefs.getStringSet("quarantine_codes",emptySet())?.toSet() ?: emptySet()
-        val remaining=dao.symbolsNeedingMetadata(batch*4)
-            .any{!updatedQuarantine.contains(it.insCode)}
-        if(!remaining || round>=45){
+        val unresolvedNow=dao.symbolsNeedingMetadata(5000)
+        val remaining=unresolvedNow.isNotEmpty()
+        val previousRemaining=prefs.getInt("previous_remaining",-1)
+        val stagnant=if(previousRemaining==unresolvedNow.size)
+            prefs.getInt("stagnant_rounds",0)+1 else 0
+        prefs.edit()
+            .putInt("previous_remaining",unresolvedNow.size)
+            .putInt("stagnant_rounds",stagnant)
+            .apply()
+
+        // At least two full passes are allowed. We stop only after repeated
+        // no-progress rounds, then keep the unresolved list as a diagnostic set.
+        if(!remaining || round>=60 || stagnant>=12){
             dao.repairLiveScoreNames()
+            val unresolvedCodes=unresolvedNow.map{it.insCode}.take(3000).toSet()
             prefs.edit()
+                .putStringSet("quarantine_codes",unresolvedCodes)
                 .putString(
                     "status",
-                    if(updatedQuarantine.isNotEmpty())
-                        "تکمیل افزایشی تمام شد؛ ${updatedQuarantine.size} مورد نامشخص در قرنطینه متادیتا هستند"
+                    if(unresolvedCodes.isNotEmpty())
+                        "Resolver کامل شد؛ ${unresolvedCodes.size} مورد هنوز پاسخ Metadata کافی ندارند و حذف نشده‌اند"
                     else "نام و بازار نمادها کامل شد"
                 )
                 .putBoolean("running",false)
@@ -131,7 +140,7 @@ class MetadataWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p){
         }
 
         prefs.edit()
-            .putString("status","این مرحله ${fixed.get()} نماد جدید/ناقص تکمیل شد؛ موارد قبلی دوباره بررسی نمی‌شوند")
+            .putString("status","مرحله ${round+1}: ${fixed.get()} مورد تکمیل شد؛ Resolver در کل فهرست نامشخص‌ها گردش می‌کند")
             .putBoolean("running",true)
             .apply()
         catalogPrefs.edit()

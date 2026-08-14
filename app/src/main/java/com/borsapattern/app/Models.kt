@@ -157,6 +157,12 @@ interface BorsaDao {
     @Query("SELECT COUNT(*) FROM queue_events WHERE status='ERROR'") suspend fun errorCount():Int
 
     @Query("""
+      SELECT COUNT(*) FROM queue_events
+      WHERE status='ERROR' AND nextDayQueueStatus=:reason
+    """)
+    suspend fun errorReasonCount(reason:String):Int
+
+    @Query("""
       SELECT COUNT(*) FROM queue_events e
       INNER JOIN symbols s ON s.insCode=e.insCode
       WHERE e.status='ERROR'

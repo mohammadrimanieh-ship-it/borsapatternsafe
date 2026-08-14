@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.work.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -302,11 +303,13 @@ class MainActivity:ComponentActivity(){
 
         LaunchedEffect(liveEnabled){
             while(liveEnabled){
+                val started=System.currentTimeMillis()
                 try{
                     LiveScanEngine.scanOnce(this@MainActivity)
                     lastLiveScan=System.currentTimeMillis()
                 }catch(_:Exception){}
-                delay(5000)
+                val elapsed=System.currentTimeMillis()-started
+                delay((5000L-elapsed).coerceAtLeast(800L))
             }
         }
 
@@ -340,7 +343,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.9.0-safe",
+                                    "Signal • v2.9.1-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -585,7 +588,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.9.0-safe",
+                        "v2.9.1-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -662,6 +665,7 @@ class MainActivity:ComponentActivity(){
         var tsetmcConnected by remember{mutableStateOf<Boolean?>(null)}
         var tsetmcLastSuccess by remember{mutableStateOf<Long?>(null)}
         val healthClient=remember{TsetmcClient()}
+        val livePerf=remember{LocalContext.current.getSharedPreferences("live_perf",Context.MODE_PRIVATE)}
         LaunchedEffect(Unit){
             while(true){
                 nowTick=System.currentTimeMillis()
@@ -814,6 +818,16 @@ class MainActivity:ComponentActivity(){
                                 fontWeight=FontWeight.Bold,
                                 color=if(liveEnabled) Color(0xFF168D68) else Color(0xFF8B8D98)
                             )
+                            val scanMs=livePerf.getLong("duration_ms",0L)
+                            val scanned=livePerf.getInt("universe_scanned",0)
+                            val deep=livePerf.getInt("deep_candidates",0)
+                            if(scanMs>0){
+                                Text(
+                                    "آخرین Scan: ${fa(scanMs.toInt())}ms • کل بازار ${fa(scanned)} • تحلیل عمیق ${fa(deep)}",
+                                    fontSize=9.sp,
+                                    color=if(scanMs<=5000) Color(0xFF168D68) else Color(0xFFB34242)
+                                )
+                            }
                         }
                         Switch(checked=liveEnabled,onCheckedChange=onLiveToggle)
                     }
@@ -1031,9 +1045,21 @@ class MainActivity:ComponentActivity(){
                 )
             }
 
+            if(preQueueStatus.contains("موقت") || preQueueStatus.contains("قیفی")){
+                item{
+                    Surface(color=Color(0xFFFFF6DF),shape=RoundedCornerShape(14.dp)){
+                        Text(
+                            "آمار این صفحه در حین تحلیل زنده به‌روزرسانی می‌شود و تا پایان Walk-Forward «موقت» است.",
+                            Modifier.fillMaxWidth().padding(10.dp),
+                            fontSize=10.sp,color=Color(0xFF7B6517)
+                        )
+                    }
+                }
+            }
+
             item{
                 PolishedCard{
-                    Text("Walk-Forward قبل از صف",fontSize=17.sp,fontWeight=FontWeight.Black)
+                    Text("Walk-Forward قیفی قبل از صف",fontSize=17.sp,fontWeight=FontWeight.Black)
                     Text(
                         preQueueStatus,
                         fontSize=10.sp,
@@ -1411,6 +1437,22 @@ class MainActivity:ComponentActivity(){
     ){
         var selectedMode by remember{mutableStateOf("QUICK")}
         var showConfirm by remember{mutableStateOf(false)}
+        var auditCategory by remember{mutableStateOf<String?>(null)}
+        val ctx=LocalContext.current
+        val catalogAuditPrefs=remember{ctx.getSharedPreferences("catalog",Context.MODE_PRIVATE)}
+        val analysisAuditPrefs=remember{ctx.getSharedPreferences("analysis",Context.MODE_PRIVATE)}
+
+        val reconciliationDelta=catalogAuditPrefs.getInt("reconciliation_delta",0)
+        val reconciledCount=catalogAuditPrefs.getInt("reconciled_count",0)
+        val sourceErrorCount=catalogAuditPrefs.getInt("source_error_count",0)
+        val duplicateCount=catalogAuditPrefs.getInt("duplicate_count",0)
+
+        val errorDaily=analysisAuditPrefs.getInt("audit_error_daily",0)
+        val errorEmpty=analysisAuditPrefs.getInt("audit_error_bestlimits_empty",0)
+        val errorTimeout=analysisAuditPrefs.getInt("audit_error_timeout",0)
+        val errorFetch=analysisAuditPrefs.getInt("audit_error_fetch",0)
+        val errorBook=analysisAuditPrefs.getInt("audit_error_book_parse",0)
+        val errorOther=analysisAuditPrefs.getInt("audit_error_other",0)
 
         LazyColumn(
             verticalArrangement=Arrangement.spacedBy(12.dp),
@@ -1461,10 +1503,10 @@ class MainActivity:ComponentActivity(){
                         Modifier.fillMaxWidth(),
                         horizontalArrangement=Arrangement.spacedBy(6.dp)
                     ){
-                        MetricPill("بورس",fa(bourseCount),Modifier.weight(1f))
-                        MetricPill("فرابورس",fa(farabourseCount),Modifier.weight(1f))
-                        MetricPill("پایه",fa(baseCount),Modifier.weight(1f))
-                        MetricPill("اهرمی",fa(leveragedCount),Modifier.weight(1f))
+                        MetricPill("بورس",fa(bourseCount),Modifier.weight(1f)){auditCategory="BOURSE"}
+                        MetricPill("فرابورس",fa(farabourseCount),Modifier.weight(1f)){auditCategory="FARABOURSE"}
+                        MetricPill("پایه",fa(baseCount),Modifier.weight(1f)){auditCategory="BASE"}
+                        MetricPill("اهرمی",fa(leveragedCount),Modifier.weight(1f)){auditCategory="LEVERAGED"}
                     }
                     if(unknownCount>0){
                         Spacer(Modifier.height(6.dp))
@@ -1473,8 +1515,8 @@ class MainActivity:ComponentActivity(){
                             shape=RoundedCornerShape(12.dp)
                         ){
                             Text(
-                                "${fa(unknownCount)} مورد stock-like هنوز بازار قطعی ندارند؛ در قرنطینه متادیتا می‌مانند و تحلیل سنگین نمی‌شوند.",
-                                Modifier.fillMaxWidth().padding(9.dp),
+                                "${fa(unknownCount)} مورد stock-like هنوز بازار قطعی ندارند؛ حذف نشده‌اند. برای دیدن نام‌ها لمس کنید.",
+                                Modifier.fillMaxWidth().clickable{auditCategory="UNKNOWN"}.padding(9.dp),
                                 fontSize=10.sp,
                                 color=Color(0xFF7B6517)
                             )
@@ -1491,20 +1533,36 @@ class MainActivity:ComponentActivity(){
                         fontSize=10.sp,color=Color(0xFF747785)
                     )
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
-                        MetricPill("اختیار",fa(excludedOption),Modifier.weight(1f))
-                        MetricPill("درآمد ثابت",fa(excludedFixedIncome),Modifier.weight(1f))
-                        MetricPill("تسه",fa(excludedHousing),Modifier.weight(1f))
+                        MetricPill("اختیار",fa(excludedOption),Modifier.weight(1f)){auditCategory="OPTION"}
+                        MetricPill("درآمد ثابت",fa(excludedFixedIncome),Modifier.weight(1f)){auditCategory="FIXED_INCOME"}
+                        MetricPill("تسه",fa(excludedHousing),Modifier.weight(1f)){auditCategory="HOUSING"}
                     }
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
-                        MetricPill("حق‌تقدم",fa(excludedRight),Modifier.weight(1f))
-                        MetricPill("اوراق",fa(excludedBond),Modifier.weight(1f))
-                        MetricPill("آتی",fa(excludedFuture),Modifier.weight(1f))
+                        MetricPill("حق‌تقدم",fa(excludedRight),Modifier.weight(1f)){auditCategory="RIGHT"}
+                        MetricPill("اوراق",fa(excludedBond),Modifier.weight(1f)){auditCategory="BOND"}
+                        MetricPill("آتی",fa(excludedFuture),Modifier.weight(1f)){auditCategory="FUTURE"}
                     }
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(5.dp)){
-                        MetricPill("کالا",fa(excludedCommodity),Modifier.weight(1f))
-                        MetricPill("صندوق غیر اهرمی",fa(excludedOtherFund),Modifier.weight(1f))
-                        MetricPill("در انتظار Metadata",fa(unknownCount),Modifier.weight(1f))
+                        MetricPill("کالا",fa(excludedCommodity),Modifier.weight(1f)){auditCategory="COMMODITY"}
+                        MetricPill("صندوق غیر اهرمی",fa(excludedOtherFund),Modifier.weight(1f)){auditCategory="OTHER_FUND"}
+                        MetricPill("در انتظار Metadata",fa(unknownCount),Modifier.weight(1f)){auditCategory="UNKNOWN"}
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        color=if(reconciliationDelta==0) Color(0xFFE8F7EF) else Color(0xFFFFE8E8),
+                        shape=RoundedCornerShape(12.dp)
+                    ){
+                        Text(
+                            if(reconciliationDelta==0)
+                                "✓ Reconciliation صحیح: ${fa(reconciledCount)} مورد حسابرسی شده"
+                            else
+                                "⚠ اختلاف حساب Universe: ${fa(reconciliationDelta)} مورد • خطای منبع ${fa(sourceErrorCount)} • تکراری ${fa(duplicateCount)}",
+                            Modifier.fillMaxWidth().padding(9.dp),
+                            fontSize=9.sp,
+                            color=if(reconciliationDelta==0) Color(0xFF118658) else Color(0xFFB34242)
+                        )
+                    }
+                    Text("برای دیدن نام و مشخصات اولیه، روی هر دسته لمس کنید.",fontSize=9.sp,color=Color(0xFF5C35C8))
                 }
             }
 
@@ -1512,7 +1570,7 @@ class MainActivity:ComponentActivity(){
                 PolishedCard{
                     Text("Audit رخدادهای صف",fontSize=17.sp,fontWeight=FontWeight.Black)
                     Text(
-                        "عدد کل تحلیل، «کاندید روز معاملاتی» است؛ بعد از BestLimits مشخص می‌شود واقعاً صف بوده یا نه.",
+                        "هر کاندید یعنی یک «نماد × روز». ابتدا وضعیت همان روز تعیین می‌شود؛ بعد فقط نمونه‌های مناسب وارد Walk-Forward می‌شوند.",
                         fontSize=10.sp,color=Color(0xFF747785)
                     )
                     Row(
@@ -1536,10 +1594,13 @@ class MainActivity:ComponentActivity(){
                         fontSize=9.sp,color=Color(0xFFD08B00)
                     )
                     if(errorCount>0){
-                        Text(
-                            "خطای تحلیل: ${fa(errorCount)} رخداد؛ این موارد در تلاش بعدی دوباره بررسی می‌شوند.",
-                            fontSize=9.sp,color=Color(0xFFB05B5B)
-                        )
+                        Surface(color=Color(0xFFFFECEC),shape=RoundedCornerShape(12.dp)){
+                            Column(Modifier.fillMaxWidth().padding(9.dp)){
+                                Text("بررسی ناموفق: ${fa(errorCount)} رخداد",fontSize=10.sp,fontWeight=FontWeight.Bold,color=Color(0xFFB34242))
+                                Text("داده روز ${fa(errorDaily)} • BestLimits خالی ${fa(errorEmpty)} • Timeout ${fa(errorTimeout)}",fontSize=9.sp,color=Color(0xFF8A5555))
+                                Text("دریافت/Parse ${fa(errorFetch)} • OrderBook نامعتبر ${fa(errorBook)} • سایر ${fa(errorOther)}",fontSize=9.sp,color=Color(0xFF8A5555))
+                            }
+                        }
                     }
                     Text(
                         "Walk-Forward فقط روی صف‌های معتبر بعد از ۰۹:۰۰ و نمونه‌های منفی مناسب اجرا می‌شود؛ صف پیش‌گشایش وارد موفقیت اصلی مدل نمی‌شود.",
@@ -1669,7 +1730,7 @@ class MainActivity:ComponentActivity(){
                         total=nextDayTotal
                     )
                     ProcessCardInline(
-                        title="۳. Walk-Forward قبل از صف",
+                        title="۳. Walk-Forward قیفی قبل از صف",
                         status=walkStatus,
                         done=walkDone,
                         total=walkTotal
@@ -1690,6 +1751,16 @@ class MainActivity:ComponentActivity(){
                     Text("اجرای تحلیل یکپارچه صف پایدار + روز بعد",fontSize=11.sp)
                 }
             }
+        }
+
+        if(auditCategory!=null){
+            val key=auditCategory!!
+            val entries=catalogAuditPrefs.getStringSet("audit_$key",emptySet())?.toList() ?: emptyList()
+            AuditEntriesDialog(
+                category=key,
+                entries=entries,
+                onDismiss={auditCategory=null}
+            )
         }
 
         if(showConfirm){
@@ -2350,9 +2421,103 @@ class MainActivity:ComponentActivity(){
     }
 
     @Composable
-    private fun MetricPill(title:String,value:String,modifier:Modifier=Modifier){
+    private fun AuditEntriesDialog(
+        category:String,
+        entries:List<String>,
+        onDismiss:()->Unit
+    ){
+        var search by remember{mutableStateOf("")}
+        var selected by remember{mutableStateOf<String?>(null)}
+        val titles=mapOf(
+            "BOURSE" to "سهام بورس",
+            "FARABOURSE" to "سهام فرابورس",
+            "BASE" to "بازار پایه",
+            "LEVERAGED" to "صندوق‌های اهرمی",
+            "UNKNOWN" to "در انتظار Metadata",
+            "OPTION" to "اختیار معامله",
+            "FIXED_INCOME" to "درآمد ثابت",
+            "HOUSING" to "تسهیلات مسکن",
+            "RIGHT" to "حق‌تقدم",
+            "BOND" to "اوراق",
+            "FUTURE" to "آتی",
+            "COMMODITY" to "کالا",
+            "OTHER_FUND" to "صندوق غیر اهرمی"
+        )
+        val title=titles[category] ?: category
+        val filtered=remember(entries,search){
+            if(search.isBlank()) entries.sorted()
+            else entries.filter{it.contains(search,true)}.sorted()
+        }
+
+        AlertDialog(
+            onDismissRequest=onDismiss,
+            title={Text("$title • ${fa(entries.size)} مورد",fontWeight=FontWeight.Black)},
+            text={
+                Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    OutlinedTextField(
+                        value=search,
+                        onValueChange={search=it},
+                        modifier=Modifier.fillMaxWidth(),
+                        singleLine=true,
+                        label={Text("جستجوی نام / نماد / insCode")}
+                    )
+                    if(selected!=null){
+                        val f=selected!!.split("\t")
+                        Surface(color=Color(0xFFF3F0FF),shape=RoundedCornerShape(12.dp)){
+                            Column(Modifier.fillMaxWidth().padding(10.dp)){
+                                Text(f.getOrNull(1)?.ifBlank{"بدون نماد"}?:"بدون نماد",fontWeight=FontWeight.Black,fontSize=17.sp)
+                                Text(f.getOrNull(2)?.ifBlank{"نام ثبت نشده"}?:"نام ثبت نشده",fontSize=11.sp)
+                                Text("insCode: ${f.getOrNull(0)?:"—"}",fontSize=10.sp)
+                                Text("flow: ${f.getOrNull(3)?.ifBlank{"—"}?:"—"}",fontSize=10.sp)
+                                Text("بازار/تابلو: ${f.getOrNull(4)?.ifBlank{"نامشخص"}?:"نامشخص"}",fontSize=10.sp)
+                                Text("نوع تشخیص‌داده‌شده: ${MarketPrefs.typeLabel(f.getOrNull(5)?:"")}",fontSize=10.sp)
+                                if(category=="UNKNOWN"){
+                                    Text("علت: Metadata بازار/تابلو هنوز برای ورود امن به Universe کافی نیست.",fontSize=9.sp,color=Color(0xFFB07A18))
+                                }
+                                TextButton(onClick={selected=null}){Text("بازگشت به فهرست")}
+                            }
+                        }
+                    }else{
+                        LazyColumn(
+                            modifier=Modifier.fillMaxWidth().heightIn(max=390.dp),
+                            verticalArrangement=Arrangement.spacedBy(5.dp)
+                        ){
+                            items(filtered.take(1000)){line->
+                                val f=line.split("\t")
+                                Surface(
+                                    modifier=Modifier.fillMaxWidth().clickable{selected=line},
+                                    color=Color(0xFFF7F8FB),
+                                    shape=RoundedCornerShape(10.dp)
+                                ){
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(9.dp),
+                                        horizontalArrangement=Arrangement.SpaceBetween
+                                    ){
+                                        Column(Modifier.weight(1f)){
+                                            Text(f.getOrNull(1)?.ifBlank{"بدون نماد"}?:"بدون نماد",fontWeight=FontWeight.Bold)
+                                            Text(f.getOrNull(2)?.ifBlank{"نام ثبت نشده"}?:"نام ثبت نشده",fontSize=9.sp,color=Color.Gray)
+                                        }
+                                        Text("›",fontSize=20.sp,color=MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton={TextButton(onClick=onDismiss){Text("بستن")}}
+        )
+    }
+
+    @Composable
+    private fun MetricPill(
+        title:String,
+        value:String,
+        modifier:Modifier=Modifier,
+        onClick:(()->Unit)?=null
+    ){
         Surface(
-            modifier=modifier,
+            modifier=if(onClick!=null) modifier.clickable{onClick()} else modifier,
             color=Color(0xFFF7F8FB),
             shape=RoundedCornerShape(14.dp)
         ){

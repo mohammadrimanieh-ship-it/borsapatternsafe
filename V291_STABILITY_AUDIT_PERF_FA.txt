@@ -1,0 +1,87 @@
+Signal v2.9.1-safe — Stability / Audit / Performance
+
+این نسخه روی v2.9.0-safe ساخته شده و تمرکزش رفع مشکلاتی است که در تست طولانی نسخه فعلی دیده شد.
+
+1) Symbol Resolver v4
+- موارد Metadata نامشخص دیگر به صورت دائمی از Retry حذف نمی‌شوند.
+- Resolver در کل فهرست موارد ناقص گردش می‌کند؛ یک گروه سخت نمی‌تواند بقیه سهم‌ها را بلوکه کند.
+- حداقل چند پاس روی کل Pool انجام می‌شود.
+- مواردی که بعد از چند پاس هنوز حل نشده‌اند فقط «در انتظار Metadata» می‌مانند؛ حذف نمی‌شوند.
+
+2) Universe Reconciliation
+- آخرین MarketWatch به عنوان فهرست مرجع جاری ذخیره می‌شود.
+- Universe با نمادهای قدیمی/خارج‌شده از MarketWatch قاطی نمی‌شود.
+- حسابرسی ریاضی:
+  Raw = Valid + Unknown + Definite Excluded + Source Errors + Duplicates
+- اگر اختلاف صفر نباشد، هشدار قرمز نمایش داده می‌شود.
+
+3) Audit Universe قابل کلیک
+روی دسته‌های زیر می‌توان کلیک کرد:
+- بورس
+- فرابورس
+- بازار پایه
+- اهرمی
+- اختیار
+- درآمد ثابت
+- تسه
+- حق‌تقدم
+- اوراق
+- آتی
+- کالا
+- صندوق غیر اهرمی
+- در انتظار Metadata
+
+هر دسته:
+- فهرست نام نمادها
+- جستجو
+- ورود به جزئیات هر مورد
+- symbol / name / insCode / flow / market-board / detected type
+
+4) تفکیک خطای تحلیل
+ERROR دیگر فقط یک عدد مبهم نیست.
+علت‌ها جدا ثبت می‌شوند:
+- Daily data missing
+- BestLimits empty
+- Timeout
+- Fetch/Parse
+- Invalid OrderBook
+- Other
+
+BestLimits خالی دیگر به اشتباه NOT_QUEUE محسوب نمی‌شود.
+
+5) Walk-Forward Funnel
+برای کاهش زمان:
+- تمام QUEUE_CONFIRMED بررسی می‌شوند.
+- 50% نمونه‌های FRAGILE_QUEUE به صورت deterministic بررسی می‌شوند.
+- 20% نمونه‌های NOT_QUEUE به صورت deterministic بررسی می‌شوند.
+این Sampling فقط برای Validation تاریخی است و هیچ اطلاعات آینده‌ای وارد Score نمی‌کند.
+
+6) Live / Incremental Metrics
+- بعد از هر چند رخداد، TP / FP / FN / Precision / Recall / Lead Time دوباره محاسبه می‌شود.
+- دیگر لازم نیست تا پایان کامل Walk-Forward صفحه صفر بماند.
+- در زمان اجرا، UI صراحتاً می‌نویسد آمار «موقت» است.
+
+7) Live Scanner Performance
+- MarketWatch فقط یک بار در هر Scan دریافت می‌شود.
+- SymbolResolver دیگر داخل Loop زنده برای تک‌تک نمادها Network call نمی‌زند.
+- Metadata از Cache محلی خوانده می‌شود.
+- تحلیل تکنیکال عمیق فقط روی Top 30 کاندید انجام می‌شود.
+- Loop زنده هنگام باز بودن برنامه تقریباً هر 5 ثانیه اجرا می‌شود.
+- Performance Monitor اضافه شد:
+  Scan duration
+  Universe scanned
+  Deep candidates
+
+8) No-Look-Ahead حفظ شده
+- SignalEvent واقعی
+- TP / FP / FN
+- Precision / Recall
+- Lead Time
+- day.high وارد Score نمی‌شود
+- نتیجه روز بعد فقط Outcome است
+
+9) بدون Migration جدید Room
+Schema دیتابیس تغییر نکرده است.
+
+versionCode=47
+versionName=2.9.1-safe

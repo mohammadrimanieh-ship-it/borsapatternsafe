@@ -35,19 +35,35 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             var rawExcludedThisRefresh=0
+            var sourceErrorCount=0
+            var duplicateCount=0
+            val seenRawCodes=linkedSetOf<String>()
             val exclusionAudit=linkedMapOf(
                 "OPTION" to 0,"FIXED_INCOME" to 0,"HOUSING" to 0,"RIGHT" to 0,
                 "BOND" to 0,"FUTURE" to 0,"COMMODITY" to 0,"TAL" to 0,
                 "ENERGY" to 0,"OTHER_FUND" to 0
             )
+            val auditEntries=linkedMapOf<String,MutableSet<String>>()
             if(!finalizeOnly){
             val existing=dao.allSymbols().associateBy{it.insCode}
             val fresh=ArrayList<SymbolEntity>(arr.length())
 
             // مرحله ۱: همه نمادهای خام قابل شناسایی را ذخیره کن؛ هنوز Universe را فیلتر نکن.
             for(i in 0 until arr.length()){
-                val o=arr.optJSONObject(i)?:continue
-                val ins=firstString(o,"insCode","instrumentId","instrumentCode")?:continue
+                val o=arr.optJSONObject(i)
+                if(o==null){
+                    sourceErrorCount++
+                    continue
+                }
+                val ins=firstString(o,"insCode","instrumentId","instrumentCode")
+                if(ins.isNullOrBlank()){
+                    sourceErrorCount++
+                    continue
+                }
+                if(!seenRawCodes.add(ins)){
+                    duplicateCount++
+                    continue
+                }
                 val old=existing[ins]
 
                 val rawSymbol=firstString(
@@ -72,11 +88,20 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 }
 
                 val type=MarketPrefs.classifyType(symbol,name,flow,board)
+                val auditLine=listOf(
+                    ins,
+                    symbol?:"",
+                    name?:"",
+                    flow?.toString()?:"",
+                    board?:"",
+                    type
+                ).joinToString("\t")
 
                 val exclusionReason=MarketPrefs.exclusionReason(symbol,name,flow,board)
                 if(exclusionReason!=null){
                     rawExcludedThisRefresh++
                     exclusionAudit[exclusionReason]=(exclusionAudit[exclusionReason] ?: 0)+1
+                    auditEntries.getOrPut(exclusionReason){linkedSetOf()}.add(auditLine)
                     continue
                 }
 
@@ -92,6 +117,18 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             }
 
             if(fresh.isNotEmpty()) dao.upsertSymbols(fresh)
+
+            prefs.edit()
+                .putStringSet("raw_codes",seenRawCodes)
+                .putInt("source_error_count",sourceErrorCount)
+                .putInt("duplicate_count",duplicateCount)
+                .apply()
+            for(key in exclusionAudit.keys){
+                prefs.edit().putStringSet(
+                    "audit_$key",
+                    auditEntries[key] ?: emptySet()
+                ).apply()
+            }
 
             // Incremental cleanup: old non-target rows from previous builds are removed
             // together with their derived analysis rows. Historical rows of valid stocks
@@ -116,6 +153,9 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
 
             // مرحله ۲: روی دیتابیس ذخیره‌شده طبقه‌بندی کن.
             val all=dao.allSymbols()
+            val currentCodes=prefs.getStringSet("raw_codes",emptySet())?.toSet() ?: emptySet()
+            val current=if(currentCodes.isEmpty()) all else all.filter{currentCodes.contains(it.insCode)}
+            val categoryEntries=linkedMapOf<String,MutableSet<String>>()
             var bourse=0
             var farabourse=0
             var base=0
@@ -123,7 +163,7 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
             var unknownStockLike=0
             var excluded=0
 
-            for(s in all){
+            for(s in current){
                 val type=MarketPrefs.classifyType(
                     s.symbol,s.name,s.flow,s.boardTitle
                 )
@@ -138,41 +178,77 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                     type==MarketPrefs.TYPE_BASE ||
                     isLev
 
+                val line=listOf(
+                    s.insCode,
+                    s.symbol?:"",
+                    s.name?:"",
+                    s.flow?.toString()?:"",
+                    s.boardTitle?:"",
+                    type
+                ).joinToString("\t")
+
                 if(!stockLike){
                     excluded++
+                    categoryEntries.getOrPut("OTHER"){linkedSetOf()}.add(line)
                     continue
                 }
 
                 if(isLev){
                     leveraged++
+                    categoryEntries.getOrPut("LEVERAGED"){linkedSetOf()}.add(line)
                 }else when(segment){
-                    MarketPrefs.BOURSE -> bourse++
-                    MarketPrefs.FARABOURSE -> farabourse++
+                    MarketPrefs.BOURSE -> {
+                        bourse++
+                        categoryEntries.getOrPut("BOURSE"){linkedSetOf()}.add(line)
+                    }
+                    MarketPrefs.FARABOURSE -> {
+                        farabourse++
+                        categoryEntries.getOrPut("FARABOURSE"){linkedSetOf()}.add(line)
+                    }
                     MarketPrefs.BASE_YELLOW,
                     MarketPrefs.BASE_ORANGE,
-                    MarketPrefs.BASE_RED -> base++
-                    else -> unknownStockLike++
+                    MarketPrefs.BASE_RED -> {
+                        base++
+                        categoryEntries.getOrPut("BASE"){linkedSetOf()}.add(line)
+                    }
+                    else -> {
+                        unknownStockLike++
+                        categoryEntries.getOrPut("UNKNOWN"){linkedSetOf()}.add(line)
+                    }
                 }
+            }
+
+            for(key in listOf("BOURSE","FARABOURSE","BASE","LEVERAGED","UNKNOWN","OTHER")){
+                prefs.edit().putStringSet(
+                    "audit_$key",
+                    categoryEntries[key] ?: emptySet()
+                ).apply()
             }
 
             // بازار نامشخص فقط برای عیب‌یابی است و تا تکمیل متادیتا وارد Universe نمی‌شود.
             val eligible=bourse+farabourse+base+leveraged
+            val rawCount=if(finalizeOnly) prefs.getInt("raw_count",current.size) else arr.length()
+            val excludedTotal=if(finalizeOnly) prefs.getInt("excluded_count",excluded) else rawExcludedThisRefresh+excluded
+            val sourceErrors=if(finalizeOnly) prefs.getInt("source_error_count",0) else sourceErrorCount
+            val duplicates=if(finalizeOnly) prefs.getInt("duplicate_count",0) else duplicateCount
+            val reconciled=eligible+unknownStockLike+excludedTotal+sourceErrors+duplicates
+            val reconciliationDelta=rawCount-reconciled
 
             prefs.edit()
                 .putBoolean("running",false)
                 .putLong("last_refresh",System.currentTimeMillis())
-                .putInt("raw_count",if(finalizeOnly) prefs.getInt("raw_count",all.size) else arr.length())
+                .putInt("raw_count",rawCount)
                 .putInt("eligible_count",eligible)
                 .putInt("bourse_count",bourse)
                 .putInt("farabourse_count",farabourse)
                 .putInt("base_count",base)
                 .putInt("leveraged_count",leveraged)
                 .putInt("unknown_count",unknownStockLike)
-                .putInt(
-                    "excluded_count",
-                    if(finalizeOnly) prefs.getInt("excluded_count",excluded)
-                    else rawExcludedThisRefresh+excluded
-                )
+                .putInt("excluded_count",excludedTotal)
+                .putInt("reconciled_count",reconciled)
+                .putInt("reconciliation_delta",reconciliationDelta)
+                .putInt("source_error_count",sourceErrors)
+                .putInt("duplicate_count",duplicates)
                 .putInt("excluded_option",if(finalizeOnly) prefs.getInt("excluded_option",0) else exclusionAudit["OPTION"] ?: 0)
                 .putInt("excluded_fixed_income",if(finalizeOnly) prefs.getInt("excluded_fixed_income",0) else exclusionAudit["FIXED_INCOME"] ?: 0)
                 .putInt("excluded_housing",if(finalizeOnly) prefs.getInt("excluded_housing",0) else exclusionAudit["HOUSING"] ?: 0)
@@ -183,10 +259,12 @@ class SymbolCatalogWorker(ctx:Context,p:WorkerParameters):CoroutineWorker(ctx,p)
                 .putInt("excluded_other_fund",if(finalizeOnly) prefs.getInt("excluded_other_fund",0) else exclusionAudit["OTHER_FUND"] ?: 0)
                 .putString(
                     "status",
-                    if(finalizeOnly && unknownStockLike>0)
+                    if(finalizeOnly && reconciliationDelta!=0)
+                        "Universe حسابرسی شد؛ اختلاف شمارش $reconciliationDelta مورد است و باید بررسی شود"
+                    else if(finalizeOnly && unknownStockLike>0)
                         "به‌روزرسانی تمام شد: $eligible معتبر؛ $unknownStockLike نماد هنوز متادیتای کافی ندارند"
                     else if(finalizeOnly)
-                        "به‌روزرسانی نمادها کامل شد: $eligible نماد معتبر"
+                        "به‌روزرسانی نمادها کامل شد: $eligible نماد معتبر؛ Reconciliation صحیح"
                     else if(unknownStockLike>0)
                         "در حال تکمیل خودکار نام/بازار؛ $eligible نماد فعلاً معتبر"
                     else

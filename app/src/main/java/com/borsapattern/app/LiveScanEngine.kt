@@ -9,6 +9,8 @@ import java.time.ZoneId
 
 object LiveScanEngine {
     suspend fun scanOnce(context:Context):Int=withContext(Dispatchers.IO){
+        val startedAt=System.currentTimeMillis()
+        val perf=context.applicationContext.getSharedPreferences("live_perf",Context.MODE_PRIVATE)
         val app=context.applicationContext as BorsaApp
         val dao=app.db.dao()
         val api=TsetmcClient()
@@ -16,6 +18,7 @@ object LiveScanEngine {
         val marketOpen=LocalTime.of(9,0)
         val marketClose=LocalTime.of(12,30)
         if(nowIran.isBefore(marketOpen) || nowIran.isAfter(marketClose)){
+            perf.edit().putString("status","OUT_OF_MARKET").apply()
             return@withContext 0
         }
 
@@ -65,14 +68,14 @@ object LiveScanEngine {
             Triple(r,pm,va)
         }.sortedByDescending{(_,pm,va)->pm*0.6+va*0.4}
 
-        val deep=ranked.take(90).associateBy{it.first.ins}
+        val deep=ranked.take(30).associateBy{it.first.ins}
         val out=ArrayList<LiveScoreEntity>(ranked.size)
 
         for((r,pm,va) in ranked){
-            val meta=SymbolResolver.ensure(
-                dao,api,r.ins,r.symbol,r.name,r.flow,r.board
-            )
-            val display=meta.symbol ?: meta.name ?: cleanSymbol(r.symbol,r.ins)
+            // Live scan must remain cheap. Metadata is read from the local cache;
+            // unresolved names are repaired by MetadataWorker outside the scan loop.
+            val meta=previous[r.ins]
+            val display=meta?.symbol ?: meta?.name ?: cleanSymbol(r.symbol,r.ins) ?: r.ins
 
             val pattern=PatternEngine.scoreLive(pm,va,0.35,0.25)
             val volume=(va*100.0).coerceIn(0.0,100.0)
@@ -125,6 +128,17 @@ object LiveScanEngine {
         dao.upsertScores(out)
         dao.repairLiveScoreNames()
         PaperTradingEngine.process(context,out)
+
+        val duration=System.currentTimeMillis()-startedAt
+        perf.edit()
+            .putString("status","OK")
+            .putLong("last_success",System.currentTimeMillis())
+            .putLong("duration_ms",duration)
+            .putInt("marketwatch_rows",arr.length())
+            .putInt("universe_scanned",ranked.size)
+            .putInt("deep_candidates",deep.size)
+            .putInt("scores_written",out.size)
+            .apply()
         out.size
     }
 }

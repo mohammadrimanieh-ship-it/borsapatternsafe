@@ -293,7 +293,7 @@ class MainActivity:ComponentActivity(){
                                     textAlign=TextAlign.Right
                                 )
                                 Text(
-                                    "Signal • v2.8.3-safe",
+                                    "Signal • v2.8.4-safe",
                                     fontSize=10.sp,
                                     color=Color(0xFF777A88)
                                 )
@@ -531,7 +531,7 @@ class MainActivity:ComponentActivity(){
                     horizontalAlignment=Alignment.CenterHorizontally
                 ){
                     Text(
-                        "v2.8.3-safe",
+                        "v2.8.4-safe",
                         color=Color(0xFF25D5C0),
                         fontWeight=FontWeight.Bold,
                         fontSize=if(compact) 9.sp else 11.sp
@@ -1295,7 +1295,7 @@ class MainActivity:ComponentActivity(){
                 PageHero(
                     eyebrow="DATASET",
                     title="استخراج داده",
-                    subtitle="فقط سهام بورس، فرابورس، بازار پایه و صندوق‌های اهرمی"
+                    subtitle="فقط سهام بورس، فرابورس، بازار پایه و صندوق‌های اهرمی؛ اختیار و درآمد ثابت حذف کامل"
                 )
             }
 
@@ -1322,6 +1322,10 @@ class MainActivity:ComponentActivity(){
                     Text(
                         "نمادهای کامل دوباره پردازش نمی‌شوند؛ فقط موارد جدید یا ناقص بررسی می‌شوند.",
                         fontSize=9.sp,color=Color(0xFF118658)
+                    )
+                    Text(
+                        "اختیار معامله و ابزارهای درآمد ثابت از همان ورودی حذف می‌شوند و وارد دیتابیس تحلیل/استخراج تاریخی نمی‌شوند.",
+                        fontSize=9.sp,color=Color(0xFFB05B5B)
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(

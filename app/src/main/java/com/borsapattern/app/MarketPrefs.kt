@@ -89,6 +89,46 @@ object MarketPrefs {
     }
 
 
+    fun isFixedIncomeInstrument(
+        symbol:String?,
+        name:String?,
+        board:String?
+    ):Boolean{
+        val s=(symbol?:"").trim().replace(" ","").replace("\u200c","")
+        val n=(name?:"").trim()
+        val b=(board?:"").trim()
+        val text="$s $n $b"
+
+        return text.contains("درآمد ثابت") ||
+            text.contains("درآمدثابت") ||
+            text.contains("با درآمد ثابت") ||
+            text.contains("اوراق بهادار با درآمد") ||
+            text.contains("صندوق سرمایه گذاری در اوراق") ||
+            text.contains("صندوق سرمایه‌گذاری در اوراق") ||
+            text.contains("اسناد خزانه") ||
+            text.contains("صکوک") ||
+            text.contains("مرابحه") ||
+            text.contains("اجاره") ||
+            text.contains("مشارکت") ||
+            text.contains("منفعت")
+    }
+
+    fun isOptionInstrument(
+        symbol:String?,
+        name:String?,
+        board:String?
+    ):Boolean{
+        val s=(symbol?:"").trim().replace(" ","").replace("\u200c","")
+        val n=(name?:"").trim()
+        val b=(board?:"").trim()
+        val text="$s $n $b"
+
+        return text.contains("اختیار") ||
+            text.contains("option",ignoreCase=true) ||
+            s.startsWith("ض") ||
+            s.startsWith("ط")
+    }
+
     fun isLeveragedFund(symbol:String?,name:String?):Boolean{
         val s=(symbol?:"").trim()
             .replace(" ","")
@@ -115,6 +155,10 @@ object MarketPrefs {
         flow:Int?,
         board:String?
     ):Boolean{
+        // Options and fixed-income instruments are hard-excluded at source.
+        if(isOptionInstrument(symbol,name,board)) return true
+        if(isFixedIncomeInstrument(symbol,name,board)) return true
+
         val type=classifyType(symbol,name,flow,board)
         val leveraged=type==TYPE_FUND && isLeveragedFund(symbol,name)
 
@@ -197,6 +241,9 @@ object MarketPrefs {
         return when{
             isLeveragedFund(s,n) -> TYPE_FUND
 
+            isOptionInstrument(s,n,b) -> TYPE_OPTION
+            isFixedIncomeInstrument(s,n,b) -> TYPE_BOND
+
             b.contains("زرد") || b.contains("نارنجی") || b.contains("قرمز") ||
                 text.contains("بازار پایه") -> TYPE_BASE
 
@@ -206,11 +253,6 @@ object MarketPrefs {
             text.contains("حق تقدم") ||
                 n.contains("حق تقدم") ||
                 (s.endsWith("ح") && s.length>2) -> TYPE_RIGHT
-
-            text.contains("اختیار معامله") ||
-                text.contains("اختیار خرید") ||
-                text.contains("اختیار فروش") ||
-                s.startsWith("ض") || s.startsWith("ط") -> TYPE_OPTION
 
             text.contains("آتی") || text.contains("قرارداد آتی") -> TYPE_FUTURE
 
